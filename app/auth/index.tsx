@@ -12,45 +12,42 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '@/hooks/useAuth';
+// Using Supabase direct Google OAuth - no need for additional imports
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
-import { Snackbar } from '@/components/ui/Snackbar';
+import { useSnackbar } from '@/components/ui/SnackbarProvider';
+import { EngagingLoader } from '@/components/ui/EngagingLoader';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
+import { inAppGoogleAuth } from '@/lib/googleAuthInApp';
 
 const { width, height } = Dimensions.get('window');
 
 export default function LoginScreen() {
-  const { signIn, signInWithGoogle, isAuthenticated, isLoading } = useAuth();
+  const { signIn, isAuthenticated, isLoading } = useAuth();
+  const [googleLoading, setGoogleLoading] = useState(false);
   const { error: urlError } = useLocalSearchParams();
+  const { 
+    showSuccess, 
+    showError, 
+    showLoginNetworkError,
+    showSnackbar 
+  } = useSnackbar();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
-  const [snackbar, setSnackbar] = useState({
-    visible: false,
-    message: '',
-    type: 'info' as 'success' | 'error' | 'info',
-  });
-
-  const showSnackbar = (message: string, type: 'success' | 'error' | 'info') => {
-    setSnackbar({ visible: true, message, type });
-  };
-
-  const hideSnackbar = () => {
-    setSnackbar(prev => ({ ...prev, visible: false }));
-  };
 
   useEffect(() => {
     if (urlError) {
       switch (urlError) {
         case 'auth_callback_error':
-          showSnackbar('Authentication failed. Please try again.', 'error');
+          showError('Authentication failed. Please try again.');
           break;
         default:
-          showSnackbar('An error occurred during authentication.', 'error');
+          showError('An error occurred during authentication.');
       }
     }
   }, [urlError]);
@@ -80,41 +77,52 @@ export default function LoginScreen() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const isNetworkError = (error: any) => {
+    const errorString = error?.toString().toLowerCase() || '';
+    return errorString.includes('network') || 
+           errorString.includes('fetch') || 
+           errorString.includes('connection') ||
+           errorString.includes('timeout') ||
+           errorString.includes('offline');
+  };
+
   const handleLogin = async () => {
     if (!validateForm()) return;
 
     setLoading(true);
-    showSnackbar('Logging in...', 'info');
+    showSnackbar('Signing in to PawPal...', 'info');
 
     try {
       const { data, error } = await signIn(email, password);
 
       if (error) {
-        showSnackbar(error, 'error');
+        // Check if it's a network error
+        if (isNetworkError(error)) {
+          showLoginNetworkError(() => handleLogin());
+        } else {
+          showError(error, 'Try Again', () => handleLogin());
+        }
       } else {
-        showSnackbar('Successfully logged in!', 'success');
+        showSuccess('Welcome back to PawPal! 🐾');
         setTimeout(() => {
           router.replace('/(tabs)/');
         }, 1000);
       }
     } catch (error) {
-      showSnackbar('An unexpected error occurred', 'error');
+      // Network or unexpected errors
+      if (isNetworkError(error)) {
+        showLoginNetworkError(() => handleLogin());
+      } else {
+        showError('An unexpected error occurred. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
-    try {
-      showSnackbar('Connecting to Google...', 'info');
-      const { error } = await signInWithGoogle();
-
-      if (error) {
-        showSnackbar(error, 'error');
-      }
-    } catch (error) {
-      showSnackbar('Google login failed', 'error');
-    }
+    showSnackbar('Google sign-in is under maintenance. Please use email and password.', 'warning');
+    return;
   };
 
   if (isLoading) {
@@ -203,13 +211,16 @@ export default function LoginScreen() {
               style={styles.socialButton}
               onPress={handleGoogleLogin}
               activeOpacity={0.8}
+              disabled={googleLoading || loading}
             >
               <Image
                 source={require('@/assets/images/google logo.png')}
                 style={styles.googleIcon}
                 resizeMode="contain"
               />
-              <Text style={styles.socialButtonText}>Continue with Google</Text>
+              <Text style={styles.socialButtonText}>
+                {googleLoading ? 'Signing in...' : 'Continue with Google'}
+              </Text>
             </TouchableOpacity>
           </View>
         </Card>
@@ -222,12 +233,15 @@ export default function LoginScreen() {
         </View>
       </ScrollView>
 
-      <Snackbar
-        message={snackbar.message}
-        type={snackbar.type}
-        isVisible={snackbar.visible}
-        onHide={hideSnackbar}
-      />
+      {/* Engaging Loader for Login */}
+      {(loading || googleLoading) && (
+        <EngagingLoader 
+          type="login" 
+          showTip={true}
+          showAnimation={true}
+        />
+      )}
+
     </LinearGradient>
   );
 }

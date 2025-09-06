@@ -8,6 +8,7 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 // Global cache for data with timestamp-based expiration
 const dataCache = new Map<string, { data: any; timestamp: number }>();
 const cacheTimeout = 5 * 60 * 1000; // 5 minutes
+const CACHE_ENABLED = false; // Disable caching globally
 
 // Global pets state and subscription management
 let globalPetsState = {
@@ -84,8 +85,8 @@ const petsManager = {
   fetchPets: async (userId: string, forceRefresh = false) => {
     const cacheKey = `pets_${userId}`;
     
-    // Try cache first (unless force refresh)
-    if (!forceRefresh) {
+    // Try cache first (unless force refresh) — disabled when CACHE_ENABLED=false
+    if (CACHE_ENABLED && !forceRefresh) {
       const cached = dataCache.get(cacheKey);
       if (cached && Date.now() - cached.timestamp < cacheTimeout) {
         console.log('📦 Using cached pets data');
@@ -115,11 +116,13 @@ const petsManager = {
 
       const pets = data || [];
       
-      // Cache the results
-      dataCache.set(cacheKey, {
-        data: pets,
-        timestamp: Date.now(),
-      });
+      // Cache the results (disabled when CACHE_ENABLED=false)
+      if (CACHE_ENABLED) {
+        dataCache.set(cacheKey, {
+          data: pets,
+          timestamp: Date.now(),
+        });
+      }
 
       petsManager.updateState({
         pets,

@@ -18,7 +18,11 @@ import { usePets } from '@/hooks/useDatabase';
 import { useSnackbar, ErrorMessages } from '@/components/ui/SnackbarProvider';
 import { MoodAnalysisAPI, MoodAnalysisResult } from '@/lib/moodAnalysisAPI';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
-import { PaywallModal } from '@/components/ui/PaywallModal';
+import { useOnboarding } from '@/hooks/useOnboarding';
+import RevenueCatPaywall from '@/components/ui/RevenueCatPaywall';
+import { OnboardingAvatar } from '@/components/ui/OnboardingAvatar';
+import Purchases from 'react-native-purchases';
+import { fixSubscriptionStatus } from '@/lib/fixSubscription';
 
 export default function MoodScreen() {
   const [activeTab, setActiveTab] = useState<'analyze' | 'history' | 'stats'>('analyze');
@@ -27,6 +31,7 @@ export default function MoodScreen() {
   const { moodLogs, moodStreaks, saveMoodLog, getMoodStats, getCurrentStreaks } = useMoodLogs();
   const { showError, showSuccess, showWarning } = useSnackbar();
   const { isSubscribed, isLoading: subscriptionLoading } = useSubscriptionStatus();
+  const { navigateToRoute } = useOnboarding();
   
   const primaryPet = pets.length > 0 ? pets[0] : null;
 
@@ -41,14 +46,6 @@ export default function MoodScreen() {
     console.log('🎯 Mood analysis completed:', result);
   };
 
-  const handleAnalysisAttempt = () => {
-    if (!isSubscribed) {
-      setShowPaywall(true);
-      return false; // Prevent analysis
-    }
-    return true; // Allow analysis
-  };
-
   const handlePaywallSuccess = () => {
     setShowPaywall(false);
     showSuccess('Welcome to Premium! 🎉 You can now analyze your pet\'s mood.');
@@ -56,6 +53,34 @@ export default function MoodScreen() {
 
   const handlePaywallClose = () => {
     setShowPaywall(false);
+  };
+
+  const handleRestorePurchases = async () => {
+    try {
+      console.log('🔄 Attempting to restore purchases...');
+      const customerInfo = await Purchases.restorePurchases();
+      
+      if (Object.keys(customerInfo.entitlements.active).length > 0) {
+        showSuccess('Purchases restored successfully! 🎉');
+        
+        // Sync RevenueCat subscription status with Supabase database using proven fix logic
+        try {
+          const syncResult = await fixSubscriptionStatus();
+          if (syncResult.success) {
+            console.log('✅ Restore sync successful');
+          } else {
+            console.error('❌ Restore sync failed:', syncResult.error);
+          }
+        } catch (error) {
+          console.error('❌ Exception during restore sync:', error);
+        }
+      } else {
+        showWarning('No previous purchases found to restore.');
+      }
+    } catch (error) {
+      console.error('❌ Error restoring purchases:', error);
+      showError('Failed to restore purchases. Please try again.');
+    }
   };
 
   // Render premium upgrade prompt for analyze tab
@@ -72,9 +97,19 @@ export default function MoodScreen() {
         style={styles.upgradeButton}
         onPress={() => setShowPaywall(true)}
       >
-        <Crown size={16} color={Colors.white} />
+        <Crown size={20} color={Colors.white} />
         <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
       </TouchableOpacity>
+      
+      {/* Add restore purchases button for users who already purchased */}
+      <TouchableOpacity 
+        style={[styles.upgradeButton, { backgroundColor: 'transparent', borderWidth: 2, borderColor: '#ff9d00' }]}
+        onPress={handleRestorePurchases}
+      >
+        <Text style={[styles.upgradeButtonText, { color: '#ff9d00' }]}>Restore Purchases</Text>
+      </TouchableOpacity>
+      
+
       <View style={styles.featureList}>
         <View style={styles.featureItem}>
           <Text style={styles.featureBullet}>✨</Text>
@@ -111,7 +146,7 @@ export default function MoodScreen() {
       
       if (savedLog) {
         showSuccess(
-          `Your pet's ${result.mood} mood has been saved to their history! 🎉`,
+          `Your pet's ${result.mood || 'unknown'} mood has been saved to their history! 🎉`,
           'View History',
           () => setActiveTab('history')
         );
@@ -125,10 +160,10 @@ export default function MoodScreen() {
   };
 
   const renderMoodLogItem = ({ item }: { item: MoodLog }) => {
-    const moodEmoji = MoodAnalysisAPI.getMoodEmoji(item.mood);
-    const moodColor = MoodAnalysisAPI.getMoodColor(item.mood);
-    const date = new Date(item.created_at).toLocaleDateString();
-    const time = new Date(item.created_at).toLocaleTimeString([], { 
+    const moodEmoji = MoodAnalysisAPI.getMoodEmoji(item.mood || 'unknown');
+    const moodColor = MoodAnalysisAPI.getMoodColor(item.mood || 'unknown');
+    const date = new Date(item.created_at || Date.now()).toLocaleDateString();
+    const time = new Date(item.created_at || Date.now()).toLocaleTimeString([], { 
       hour: '2-digit', 
       minute: '2-digit' 
     });
@@ -142,12 +177,12 @@ export default function MoodScreen() {
         <View style={styles.moodLogContent}>
           <View style={styles.moodLogHeader}>
             <Text style={styles.moodLogMood}>
-              {item.mood.charAt(0).toUpperCase() + item.mood.slice(1).replace('_', ' ')}
+              {(item.mood || 'unknown').charAt(0).toUpperCase() + (item.mood || 'unknown').slice(1).replace('_', ' ')}
             </Text>
             <Text style={styles.moodLogDate}>{date}</Text>
           </View>
           
-          <Text style={styles.moodLogAdvice}>{item.advice}</Text>
+          <Text style={styles.moodLogAdvice}>{item.advice || 'No advice available'}</Text>
           
           {item.context && (
             <Text style={styles.moodLogContext}>Context: {item.context}</Text>
@@ -155,7 +190,7 @@ export default function MoodScreen() {
           
           <View style={styles.moodLogFooter}>
             <Text style={styles.moodLogConfidence}>
-              {Math.round(item.confidence * 100)}% confidence
+              {Math.round((item.confidence || 0) * 100)}% confidence
             </Text>
             <Text style={styles.moodLogTime}>{time}</Text>
           </View>
@@ -174,16 +209,16 @@ export default function MoodScreen() {
     }
 
     const stats = getMoodStats();
-    const streaks = getCurrentStreaks(primaryPet.id);
+    const streaks = getCurrentStreaks(primaryPet?.id || '');
 
     return (
-      <ScrollView style={styles.statsContainer}>
+      <View style={styles.statsContainer}>
         <View style={styles.statsCard}>
           <Text style={styles.statsTitle}>📊 Mood Overview</Text>
           
           <View style={styles.statRow}>
             <Text style={styles.statLabel}>Total Analyses:</Text>
-            <Text style={styles.statValue}>{stats.totalLogs}</Text>
+            <Text style={styles.statValue}>{stats.totalLogs || 0}</Text>
           </View>
           
           {stats.mostCommonMood && (
@@ -198,7 +233,7 @@ export default function MoodScreen() {
           <View style={styles.statRow}>
             <Text style={styles.statLabel}>Average Confidence:</Text>
             <Text style={styles.statValue}>
-              {Math.round(stats.averageConfidence * 100)}%
+              {Math.round((stats.averageConfidence || 0) * 100)}%
             </Text>
           </View>
         </View>
@@ -212,107 +247,130 @@ export default function MoodScreen() {
                   {streak.streak_type === 'happy' ? '😊 Happy Streak' : '📅 Daily Check Streak'}
                 </Text>
                 <Text style={styles.streakCount}>
-                  {streak.current_count} days (Best: {streak.best_count})
+                  {streak.current_count || 0} days (Best: {streak.best_count || 0})
                 </Text>
               </View>
             ))}
           </View>
         )}
-      </ScrollView>
+      </View>
     );
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <ArrowLeft size={24} color="#544c3a" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Snap My Mood</Text>
-        <View style={styles.placeholder} />
-      </View>
-
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'analyze' && styles.activeTab]}
-          onPress={() => setActiveTab('analyze')}
-        >
-          <Text style={[styles.tabText, activeTab === 'analyze' && styles.activeTabText]}>
-            📸 Analyze
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'history' && styles.activeTab]}
-          onPress={() => setActiveTab('history')}
-        >
-          <Calendar size={16} color={activeTab === 'history' ? Colors.white : Colors.text} />
-          <Text style={[styles.tabText, activeTab === 'history' && styles.activeTabText]}>
-            History
-          </Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'stats' && styles.activeTab]}
-          onPress={() => setActiveTab('stats')}
-        >
-          <TrendingUp size={16} color={activeTab === 'stats' ? Colors.white : Colors.text} />
-          <Text style={[styles.tabText, activeTab === 'stats' && styles.activeTabText]}>
-            Stats
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {activeTab === 'analyze' && (
-          <>
-            {!subscriptionLoading && !isSubscribed ? (
-              renderPremiumPrompt()
-            ) : (
-              <SnapMoodCard
-                onAnalysisComplete={handleAnalysisComplete}
-                onSaveMoodLog={handleSaveMoodLog}
-                onAnalysisAttempt={handleAnalysisAttempt}
-              />
-            )}
-          </>
-        )}
-
-        {activeTab === 'history' && (
-          <View style={styles.historyContainer}>
-            {moodLogs.length > 0 ? (
-              <FlatList
-                data={moodLogs}
-                renderItem={renderMoodLogItem}
-                keyExtractor={(item) => item.id}
-                scrollEnabled={false}
-              />
-            ) : (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyText}>No mood logs yet</Text>
-                <Text style={styles.emptySubtext}>
-                  Take your first mood analysis to start building your pet's emotional profile
-                </Text>
-                <TouchableOpacity
-                  style={styles.emptyButton}
-                  onPress={() => setActiveTab('analyze')}
-                >
-                  <Text style={styles.emptyButtonText}>Start Analyzing</Text>
-                </TouchableOpacity>
-              </View>
-            )}
+      {/* Only show header and tabs when paywall is not visible */}
+      {!showPaywall && (
+        <>
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+              <ArrowLeft size={24} color="#544c3a" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Snap My Mood</Text>
+            <View style={styles.placeholder} />
           </View>
-        )}
 
-        {activeTab === 'stats' && renderStatsTab()}
-      </ScrollView>
+          <View style={styles.tabContainer}>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'analyze' && styles.activeTab]}
+              onPress={() => setActiveTab('analyze')}
+            >
+              <Text style={[styles.tabText, activeTab === 'analyze' && styles.activeTabText]}>
+                📸 Analyze
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'history' && styles.activeTab]}
+              onPress={() => setActiveTab('history')}
+            >
+              <Calendar size={16} color={activeTab === 'history' ? Colors.white : Colors.text} />
+              <Text style={[styles.tabText, activeTab === 'history' && styles.activeTabText]}>
+                History
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'stats' && styles.activeTab]}
+              onPress={() => setActiveTab('stats')}
+            >
+              <TrendingUp size={16} color={activeTab === 'stats' ? Colors.white : Colors.text} />
+              <Text style={[styles.tabText, activeTab === 'stats' && styles.activeTabText]}>
+                Stats
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
 
-      {/* Premium Paywall Modal */}
-      <PaywallModal
-        visible={showPaywall}
-        onClose={handlePaywallClose}
-        onPurchaseSuccess={handlePaywallSuccess}
-        requiredEntitlement="premium"
+      {/* Only show content when paywall is not visible */}
+      {!showPaywall && (
+        <View style={styles.content}>
+          {activeTab === 'analyze' && (
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.tabContent}>
+              {!subscriptionLoading && !isSubscribed ? (
+                renderPremiumPrompt()
+              ) : (
+                <SnapMoodCard
+                  onAnalysisComplete={handleAnalysisComplete}
+                  onSaveMoodLog={handleSaveMoodLog}
+                />
+              )}
+            </ScrollView>
+          )}
+
+          {activeTab === 'history' && (
+            <View style={styles.historyContainer}>
+              {moodLogs.length > 0 ? (
+                <FlatList
+                  data={moodLogs}
+                  renderItem={renderMoodLogItem}
+                  keyExtractor={(item) => item.id || String(Math.random())}
+                  showsVerticalScrollIndicator={false}
+                  contentContainerStyle={styles.historyList}
+                />
+              ) : (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyText}>No mood logs yet</Text>
+                  <Text style={styles.emptySubtext}>
+                    Take your first mood analysis to start building your pet's emotional profile
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.emptyButton}
+                    onPress={() => setActiveTab('analyze')}
+                  >
+                    <Text style={styles.emptyButtonText}>Start Analyzing</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          )}
+
+          {activeTab === 'stats' && (
+            <ScrollView showsVerticalScrollIndicator={false} style={styles.tabContent}>
+              {renderStatsTab()}
+            </ScrollView>
+          )}
+        </View>
+      )}
+
+      {/* Premium Paywall - Using JSX Component (No Threading Issues) */}
+      {showPaywall && (
+        <RevenueCatPaywall
+          visible={showPaywall}
+          onDismiss={handlePaywallClose}
+          onPurchaseCompleted={(customerInfo) => {
+            console.log('Purchase completed:', customerInfo);
+            handlePaywallSuccess();
+          }}
+          requiredEntitlementIdentifier="premium"
+        />
+      )}
+      
+      {/* Onboarding Avatar for First-Time Users */}
+      <OnboardingAvatar 
+        currentScreen="mood"
+        onNavigate={navigateToRoute}
       />
     </View>
   );
@@ -374,8 +432,15 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  tabContent: {
+    flex: 1,
+  },
   historyContainer: {
+    flex: 1,
     padding: 16,
+  },
+  historyList: {
+    paddingBottom: 20,
   },
   moodLogItem: {
     flexDirection: 'row',
@@ -482,6 +547,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
   statsContainer: {
+    flex: 1,
     padding: 16,
   },
   statsCard: {
@@ -533,39 +599,7 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.body.bold,
     color: '#ff9d00',
   },
-  debugSection: {
-    margin: 16,
-    padding: 16,
-    backgroundColor: '#FFE0B2',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ff9d00',
-  },
-  debugTitle: {
-    fontSize: 14,
-    fontFamily: Fonts.body.bold,
-    color: '#E65100',
-    marginBottom: 8,
-  },
-  debugText: {
-    fontSize: 12,
-    fontFamily: Fonts.body.regular,
-    color: '#E65100',
-    marginBottom: 4,
-  },
-  debugButton: {
-    backgroundColor: '#ff9d00',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 6,
-    marginTop: 8,
-  },
-  debugButtonText: {
-    fontSize: 12,
-    fontFamily: Fonts.body.medium,
-    color: Colors.white,
-    textAlign: 'center',
-  },
+
   premiumPrompt: {
     margin: 16,
     padding: 24,

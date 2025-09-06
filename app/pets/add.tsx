@@ -13,21 +13,95 @@ import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ArrowLeft, Camera } from 'lucide-react-native';
 import { usePets } from '@/hooks/useDatabase';
+import { useAuth } from '@/hooks/useAuth';
 import { useSnackbar, ErrorMessages } from '@/components/ui/SnackbarProvider';
+import { MediaUtils } from '@/lib/mediaUtils';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { Button } from '@/components/ui/Button';
+import { supabase } from '@/lib/supabase';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Badge checking functionality for pets
+const checkPetBadges = async (userId: string, showSnackbar: (message: string, type?: string) => void) => {
+  try {
+    // Count user's pets
+    const { data: pets, error } = await supabase
+      .from('pets')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (error) {
+      return;
+    }
+
+    const petCount = pets?.length || 0;
+
+    // Award badges based on milestones
+    if (petCount === 1) {
+      showSnackbar('🏅 Badge Earned: Pet Parent! Your furry friend is lucky to have you! (+15 points)', 'success');
+    } else if (petCount === 3) {
+      showSnackbar('🏅 Badge Earned: Pack Leader! You\'re managing a whole pack! (+35 points)', 'success');
+    }
+  } catch (error) {
+    // Silent error handling for production
+  }
+};
+
+// Helper function to advance onboarding (removed - no longer needed)
+const advanceOnboarding = async (userId: string) => {
+  // No longer needed - onboarding is just a simple welcome message
+  console.log('🎯 Onboarding: Pet added, but onboarding is now simplified');
+};
 
 export default function AddPetScreen() {
   const { createPet } = usePets();
-  const { showError, showWarning } = useSnackbar();
+  const { user } = useAuth();
+  const { showError, showWarning, showSuccess } = useSnackbar();
   const [loading, setLoading] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [petData, setPetData] = useState({
     name: '',
     breed: '',
     age: '',
-    gender: 'unknown' as 'male' | 'female' | 'unknown',
+    gender: 'male' as 'male' | 'female',
   });
+
+  const handleImagePicker = async () => {
+    try {
+      Alert.alert(
+        'Add Pet Photo',
+        'Choose how you want to add your pet\'s photo',
+        [
+          {
+            text: 'Take Photo',
+            onPress: async () => {
+              const result = await MediaUtils.captureImage();
+              if (result) {
+                setSelectedImage(result.uri);
+              }
+            },
+          },
+          {
+            text: 'Choose from Gallery',
+            onPress: async () => {
+              const result = await MediaUtils.pickImageFromLibrary();
+              if (result) {
+                setSelectedImage(result.uri);
+              }
+            },
+          },
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+        ]
+      );
+    } catch (error) {
+      console.error('Error with image picker:', error);
+      showError('Failed to pick image. Please try again.');
+    }
+  };
 
   const handleCreatePet = async () => {
     if (!petData.name.trim()) {
@@ -43,29 +117,71 @@ export default function AddPetScreen() {
     setLoading(true);
     
     try {
+      console.log('🐕 Creating pet with data:', {
+        name: petData.name.trim(),
+        breed: petData.breed.trim() || 'Mixed Breed',
+        age: Number(petData.age),
+        gender: petData.gender
+      });
+
       const { data, error } = await createPet({
         name: petData.name.trim(),
         breed: petData.breed.trim() || 'Mixed Breed',
         age: Number(petData.age),
         gender: petData.gender,
+        avatar_url: selectedImage || undefined,
       });
 
-      if (data) {
-        // Clear form
-        setPetData({
-          name: '',
-          breed: '',
-          age: '',
-          gender: 'unknown',
-        });
-        
-        // Navigate to mood analysis after successful creation
-        setTimeout(() => {
-          router.replace('/(tabs)/mood');
-        }, 2000); // Wait for success snackbar to show
+      console.log('🐕 Pet creation result:', { data, error });
+
+      if (error) {
+        console.error('❌ Pet creation error:', error);
+        showError('Failed to create pet. Please try again.');
+        return;
       }
+
+      // Pet creation was successful (no error means success)
+      console.log('✅ Pet created successfully');
+      
+      // Show immediate success feedback
+      showSuccess(`🎉 ${petData.name.trim()} has been added to your VetPaw family!`);
+      
+      // Show detailed success popup
+      Alert.alert(
+        'Pet Added Successfully! 🎉',
+        `${petData.name.trim()} has been added to your VetPaw family! Welcome to the pack! 🐾`,
+        [
+          {
+            text: 'Great!',
+            onPress: async () => {
+              console.log('🎉 User acknowledged pet creation success');
+              
+              // Clear form
+              setPetData({
+                name: '',
+                breed: '',
+                age: '',
+                gender: 'male',
+              });
+              setSelectedImage(null);
+              
+              // Check for pet milestone badges (use user ID since data might be different format)
+              if (user?.id) {
+                console.log('🏅 Checking for badges for user:', user.id);
+                await checkPetBadges(user.id, showSuccess);
+              }
+              
+              // Add 2-second delay before redirecting to home
+              console.log('🏠 Redirecting to home in 2 seconds...');
+              setTimeout(() => {
+                router.push('/(tabs)/');
+              }, 2000);
+            }
+          }
+        ]
+      );
     } catch (err) {
-      console.error('Error creating pet:', err);
+      console.error('💥 Error creating pet:', err);
       showError('Something went wrong while creating your pet. Please try again.');
     } finally {
       setLoading(false);
@@ -93,15 +209,24 @@ export default function AddPetScreen() {
         <View style={styles.avatarSection}>
           <View style={styles.avatarContainer}>
             <Image
-              source={require('@/assets/images/login page icon.png')}
+              source={
+                selectedImage 
+                  ? { uri: selectedImage }
+                  : require('@/assets/images/login page icon.png')
+              }
               style={styles.avatar}
-              resizeMode="contain"
+              resizeMode={selectedImage ? "cover" : "contain"}
             />
-            <TouchableOpacity style={styles.cameraButton}>
+            <TouchableOpacity 
+              style={styles.cameraButton}
+              onPress={handleImagePicker}
+            >
               <Camera size={16} color={Colors.white} />
             </TouchableOpacity>
           </View>
-          <Text style={styles.avatarText}>Add a photo (optional)</Text>
+          <Text style={styles.avatarText}>
+            {selectedImage ? 'Tap camera to change photo' : 'Add a photo (optional)'}
+          </Text>
         </View>
 
         {/* Pet Information Form */}
@@ -143,7 +268,7 @@ export default function AddPetScreen() {
           <View style={styles.inputContainer}>
             <Text style={styles.inputLabel}>Gender</Text>
             <View style={styles.genderContainer}>
-              {(['male', 'female', 'unknown'] as const).map((gender) => (
+              {(['male', 'female'] as const).map((gender) => (
                 <TouchableOpacity
                   key={gender}
                   style={[
@@ -158,7 +283,7 @@ export default function AddPetScreen() {
                       petData.gender === gender && styles.genderButtonTextActive
                     ]}
                   >
-                    {gender.charAt(0).toUpperCase() + gender.slice(1)}
+                    {gender === 'male' ? '♂ Male' : '♀ Female'}
                   </Text>
                 </TouchableOpacity>
               ))}

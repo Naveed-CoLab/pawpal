@@ -1,5 +1,6 @@
 import * as Speech from 'expo-speech';
 import { Alert, Platform } from 'react-native';
+import { Audio } from 'expo-av';
 
 export interface SpeechOptions {
   language?: string;
@@ -17,6 +18,7 @@ export interface SpeechToTextResult {
 export class SpeechUtils {
   private static isListening = false;
   private static speechRecognition: any = null;
+  private static recording: Audio.Recording | null = null;
 
   static async requestMicrophonePermission(): Promise<boolean> {
     try {
@@ -32,8 +34,22 @@ export class SpeechUtils {
         }
         return true;
       } else {
-        // For mobile, permissions are handled automatically by expo-speech
-        return true;
+        // For mobile, request audio recording permission
+        try {
+          const permission = await Audio.requestPermissionsAsync();
+          if (permission.status !== 'granted') {
+            Alert.alert(
+              'Microphone Permission Required',
+              'Please allow microphone access to use voice input.',
+              [{ text: 'OK' }]
+            );
+            return false;
+          }
+          return true;
+        } catch (error) {
+          console.error('Error requesting audio permission:', error);
+          return false;
+        }
       }
     } catch (error) {
       console.error('Error requesting microphone permission:', error);
@@ -58,18 +74,111 @@ export class SpeechUtils {
       if (Platform.OS === 'web') {
         return this.startWebSpeechRecognition(onResult, onStart, onEnd);
       } else {
-        // For mobile platforms, we'll show a message that this feature is coming soon
-        Alert.alert(
-          'Coming Soon',
-          'Voice input will be available in our next update. We\'re working hard to bring this feature to you soon!',
-          [{ text: 'OK' }]
-        );
-        return false;
+        // For mobile platforms, use a simplified voice input approach
+        return this.startMobileSpeechRecognition(onResult, onStart, onEnd);
       }
     } catch (error) {
       console.error('Error starting speech recognition:', error);
       onResult({ text: '', error: 'Failed to start speech recognition' });
       return false;
+    }
+  }
+
+  private static async startMobileSpeechRecognition(
+    onResult: (result: SpeechToTextResult) => void,
+    onStart?: () => void,
+    onEnd?: () => void
+  ): Promise<boolean> {
+    try {
+      // Set up audio recording
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const recordingOptions: Audio.RecordingOptions = {
+        android: {
+          extension: '.m4a',
+          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
+          audioEncoder: Audio.AndroidAudioEncoder.AAC,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+        },
+        ios: {
+          extension: '.m4a',
+          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
+          audioQuality: Audio.IOSAudioQuality.HIGH,
+          sampleRate: 44100,
+          numberOfChannels: 2,
+          bitRate: 128000,
+        },
+        web: {
+          mimeType: 'audio/webm;codecs=opus',
+          bitsPerSecond: 128000,
+        },
+      };
+
+      this.recording = new Audio.Recording();
+      await this.recording.prepareToRecordAsync(recordingOptions);
+      
+      this.isListening = true;
+      onStart?.();
+      
+      await this.recording.startAsync();
+      console.log('🎤 Mobile recording started');
+
+      // Show user instructions
+      Alert.alert(
+        'Voice Input Active',
+        'Speak now! Tap the mic again when finished.',
+        [
+          {
+            text: 'Stop Recording',
+            onPress: () => this.stopMobileSpeechRecognition(onResult, onEnd)
+          }
+        ]
+      );
+
+      return true;
+    } catch (error) {
+      console.error('Error starting mobile speech recognition:', error);
+      this.isListening = false;
+      onResult({ text: '', error: 'Failed to start voice recording' });
+      onEnd?.();
+      return false;
+    }
+  }
+
+  private static async stopMobileSpeechRecognition(
+    onResult: (result: SpeechToTextResult) => void,
+    onEnd?: () => void
+  ): Promise<void> {
+    try {
+      if (!this.recording) return;
+
+      await this.recording.stopAndUnloadAsync();
+      const uri = this.recording.getURI();
+      
+      this.isListening = false;
+      this.recording = null;
+      
+      console.log('🎤 Mobile recording stopped, URI:', uri);
+      
+      // For now, we'll ask the user to type what they said
+      // In a full implementation, you'd send the audio to a speech-to-text service
+      Alert.alert(
+        'Voice Input Complete',
+        'Audio recorded! Please type your message in the text box for now. Full speech-to-text is coming in the next update.',
+        [{ text: 'OK' }]
+      );
+      
+      onResult({ text: '', confidence: 0 });
+      onEnd?.();
+    } catch (error) {
+      console.error('Error stopping mobile recording:', error);
+      this.isListening = false;
+      onEnd?.();
     }
   }
 
@@ -84,7 +193,7 @@ export class SpeechUtils {
       if (!SpeechRecognition) {
         Alert.alert(
           'Speech Recognition Not Available',
-          'Speech recognition is not supported in your browser.',
+          'Speech recognition is not supported in your browser. Please use Chrome or Edge.',
           [{ text: 'OK' }]
         );
         return false;
@@ -99,7 +208,7 @@ export class SpeechUtils {
       this.speechRecognition.onstart = () => {
         this.isListening = true;
         onStart?.();
-        console.log('Speech recognition started');
+        console.log('🎤 Web speech recognition started');
       };
 
       this.speechRecognition.onresult = (event: any) => {
@@ -107,6 +216,7 @@ export class SpeechUtils {
         if (result.isFinal) {
           const transcript = result[0].transcript;
           const confidence = result[0].confidence;
+          console.log('🎤 Speech result:', transcript);
           onResult({ text: transcript, confidence });
         }
       };
@@ -124,7 +234,10 @@ export class SpeechUtils {
             errorMessage = 'Microphone not available. Please check your microphone settings.';
             break;
           case 'not-allowed':
-            errorMessage = 'Microphone permission denied. Please allow microphone access.';
+            errorMessage = 'Microphone permission denied. Please allow microphone access in your browser.';
+            break;
+          case 'network':
+            errorMessage = 'Network error. Please check your internet connection.';
             break;
         }
         
@@ -135,21 +248,33 @@ export class SpeechUtils {
       this.speechRecognition.onend = () => {
         this.isListening = false;
         onEnd?.();
-        console.log('Speech recognition ended');
+        console.log('🎤 Web speech recognition ended');
       };
 
       this.speechRecognition.start();
       return true;
     } catch (error) {
-      console.error('Error setting up speech recognition:', error);
+      console.error('Error setting up web speech recognition:', error);
       return false;
     }
   }
 
   static stopSpeechToText(): void {
-    if (this.speechRecognition && this.isListening) {
-      this.speechRecognition.stop();
-      this.isListening = false;
+    if (Platform.OS === 'web') {
+      if (this.speechRecognition && this.isListening) {
+        this.speechRecognition.stop();
+        this.isListening = false;
+      }
+    } else {
+      if (this.recording && this.isListening) {
+        // Call the async function but don't await it since this method is void
+        this.stopMobileSpeechRecognition(
+          () => {}, // empty onResult
+          () => {}  // empty onEnd
+        ).catch(error => {
+          console.error('Error stopping mobile speech recognition:', error);
+        });
+      }
     }
   }
 

@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Dimensions,
   Platform,
+  Linking,
 } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -16,15 +17,17 @@ import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Card } from '@/components/ui/Card';
 import { Snackbar } from '@/components/ui/Snackbar';
+import { EngagingLoader } from '@/components/ui/EngagingLoader';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { ArrowLeft } from 'lucide-react-native';
+import { dynamicGoogleAuth } from '@/lib/googleAuthServiceDynamic';
 
 const { width, height } = Dimensions.get('window');
 
 // Password strength checker
 const checkPasswordStrength = (password: string) => {
-  if (!password) return { score: 0, label: '' };
+  if (!password) return { score: 0, label: '', color: '' };
   
   let score = 0;
   
@@ -66,7 +69,7 @@ const checkPasswordStrength = (password: string) => {
 };
 
 export default function SignupScreen() {
-  const { signUp, signInWithGoogle, signInWithFacebook, isAuthenticated, isLoading } = useAuth();
+  const { signUp, isAuthenticated, isLoading, signInWithFacebook } = useAuth();
   
   const [formData, setFormData] = useState({
     name: '',
@@ -75,6 +78,7 @@ export default function SignupScreen() {
     confirmPassword: '',
   });
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [snackbar, setSnackbar] = useState({
     visible: false,
@@ -87,6 +91,8 @@ export default function SignupScreen() {
     color: '' 
   });
   const [passwordsMatch, setPasswordsMatch] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
 
   // Check password strength whenever password changes
   useEffect(() => {
@@ -143,6 +149,14 @@ export default function SignupScreen() {
       newErrors.confirmPassword = 'Passwords do not match';
     }
 
+    if (!termsAccepted) {
+      newErrors.terms = 'Please accept the Terms of Service';
+    }
+
+    if (!privacyAccepted) {
+      newErrors.privacy = 'Please accept the Privacy Policy';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -172,16 +186,8 @@ export default function SignupScreen() {
   };
 
   const handleGoogleSignup = async () => {
-    try {
-      showSnackbar('Connecting to Google...', 'info');
-      const { error } = await signInWithGoogle();
-      
-      if (error) {
-        showSnackbar(error, 'error');
-      }
-    } catch (error) {
-      showSnackbar('Google signup failed', 'error');
-    }
+    showSnackbar('Google sign-up is under maintenance. Please sign up with email.', 'info');
+    return;
   };
 
   const handleFacebookSignup = async () => {
@@ -211,7 +217,7 @@ export default function SignupScreen() {
 
   if (isLoading) {
     return (
-      <LinearGradient colors={Colors.backgroundGradient} style={styles.container}>
+      <LinearGradient colors={Colors.backgroundGradient as [any, any]} style={styles.container}>
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading...</Text>
         </View>
@@ -221,7 +227,7 @@ export default function SignupScreen() {
 
   return (
     <LinearGradient
-      colors={Colors.backgroundGradient}
+      colors={Colors.backgroundGradient as [any, any]}
       style={styles.container}
     >
       <TouchableOpacity
@@ -238,7 +244,7 @@ export default function SignupScreen() {
         {/* Header */}
         <View style={styles.header}>
           <View style={styles.headerRow}>
-            <Text style={styles.welcomeText}>Join VetPaw!</Text>
+            <Text style={styles.welcomeText}>Join PawPal!</Text>
             <View style={styles.dogContainer}>
               <Image
                 source={require('@/assets/images/login page icon.png')}
@@ -345,12 +351,63 @@ export default function SignupScreen() {
               )}
             </View>
 
+            {/* Terms and Privacy Checkboxes */}
+            <View style={styles.checkboxContainer}>
+              <TouchableOpacity 
+                style={styles.checkboxRow}
+                onPress={() => setTermsAccepted(!termsAccepted)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, termsAccepted && styles.checkboxChecked]}>
+                  {termsAccepted && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+                <View style={styles.checkboxTextContainer}>
+                  <Text style={styles.checkboxText}>
+                    I agree to the{' '}
+                    <Text
+                      style={styles.linkText}
+                      onPress={() => Linking.openURL('https://vetpaw.app/terms')}
+                    >
+                      Terms of Service
+                    </Text>
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              {errors.terms && <Text style={styles.errorText}>{errors.terms}</Text>}
+
+              <TouchableOpacity 
+                style={styles.checkboxRow}
+                onPress={() => setPrivacyAccepted(!privacyAccepted)}
+                activeOpacity={0.7}
+              >
+                <View style={[styles.checkbox, privacyAccepted && styles.checkboxChecked]}>
+                  {privacyAccepted && <Text style={styles.checkmark}>✓</Text>}
+                </View>
+                <View style={styles.checkboxTextContainer}>
+                  <Text style={styles.checkboxText}>
+                    I agree to the{' '}
+                    <Text
+                      style={styles.linkText}
+                      onPress={() => Linking.openURL('https://vetpaw.app/privacy')}
+                    >
+                      Privacy Policy
+                    </Text>
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              {errors.privacy && <Text style={styles.errorText}>{errors.privacy}</Text>}
+            </View>
+
             {/* Create Account Button */}
             <Button
               title="Create Account"
               onPress={handleSignup}
               loading={loading}
-              style={styles.signupButton}
+              disabled={!termsAccepted || !privacyAccepted}
+              style={StyleSheet.flatten([
+                styles.signupButton,
+                (!termsAccepted || !privacyAccepted) ? styles.signupButtonDisabled : null
+              ])}
             />
 
             {/* Divider */}
@@ -363,13 +420,16 @@ export default function SignupScreen() {
               style={styles.socialButton}
               onPress={handleGoogleSignup}
               activeOpacity={0.8}
+              disabled={googleLoading || loading}
             >
               <Image
                 source={require('@/assets/images/google logo.png')}
                 style={styles.googleIcon}
                 resizeMode="contain"
               />
-              <Text style={styles.socialButtonText}>Sign up with Google</Text>
+              <Text style={styles.socialButtonText}>
+                {googleLoading ? 'Signing up...' : 'Sign up with Google'}
+              </Text>
             </TouchableOpacity>
 
         
@@ -385,12 +445,22 @@ export default function SignupScreen() {
         </View>
       </ScrollView>
 
+      {/* Engaging Loader for Signup */}
+      {(loading || googleLoading) && (
+        <EngagingLoader 
+          type="signup" 
+          showTip={true}
+          showAnimation={true}
+        />
+      )}
+
       <Snackbar
         message={snackbar.message}
         type={snackbar.type}
         isVisible={snackbar.visible}
         onHide={hideSnackbar}
       />
+
     </LinearGradient>
   );
 }
@@ -517,6 +587,9 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     minHeight: 50,
   },
+  signupButtonDisabled: {
+    opacity: 0.6,
+  },
   divider: {
     alignItems: 'center',
     marginBottom: 24,
@@ -611,5 +684,55 @@ const styles = StyleSheet.create({
     color: Colors.error,
     fontSize: 14,
     fontFamily: Fonts.body.medium,
+  },
+  checkboxContainer: {
+    marginBottom: 20,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    borderRadius: 4,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: '#ff9d00',
+    borderColor: '#ff9d00',
+  },
+  checkmark: {
+    color: Colors.white,
+    fontSize: 12,
+    fontFamily: Fonts.body.bold,
+  },
+  checkboxTextContainer: {
+    flex: 1,
+  },
+  checkboxText: {
+    fontSize: 14,
+    fontFamily: Fonts.body.regular,
+    color: Colors.text,
+    lineHeight: 20,
+  },
+  linkText: {
+    color: '#ff9d00',
+    fontFamily: Fonts.body.semiBold,
+    textDecorationLine: 'underline',
+  },
+  errorText: {
+    fontSize: 12,
+    fontFamily: Fonts.body.regular,
+    color: Colors.error,
+    marginTop: 4,
+    marginLeft: 32,
   },
 });

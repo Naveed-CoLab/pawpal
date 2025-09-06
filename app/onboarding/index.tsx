@@ -22,6 +22,7 @@ import Animated, {
 import { Audio } from 'expo-av';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
+import { onboardingService } from '@/lib/onboardingService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -31,7 +32,7 @@ const { width, height } = Dimensions.get('window');
 const slides = [
   {
     id: '1',
-    title: 'Welcome to VetPaw!',
+    title: 'Welcome to PawPal!',
     description:
       'Meet your AI-powered pet care companion — designed for first-time pet parents. Get expert guidance, instant answers, and 24/7 support for your furry friend.',
     image: require('@/assets/images/Onboarding1 Image.png'),
@@ -48,8 +49,8 @@ const slides = [
     id: '3',
     title: 'Train, Bond & Grow Together 💬',
     description:
-      'From live video coaching to behavior tips and mood insights — VetPaw helps you raise a happy, healthy pup from day one. Let’s make pet parenting stress-free and fun!',
-    image: require('@/assets/images/paywall_vetpaw-removebg-preview.png'),
+      'From live video mentorship to behavior tips and mood insights — PawPal helps you raise a happy, healthy pup from day one. Let\'s make pet parenting stress-free and fun!',
+    image: require('@/assets/images/paywall_PawPal-removebg-preview.png'),
     buttonText: 'Try Free Version',
   },
 ] as const;
@@ -194,6 +195,8 @@ export default function OnboardingScreen() {
         },
       );
     } else {
+      // Mark onboarding as completed and navigate to auth
+      onboardingService.markOnboardingCompleted();
       router.replace('/auth');
     }
   };
@@ -258,7 +261,10 @@ export default function OnboardingScreen() {
            ------------------------------------------------------------------- */}
       {page < slides.length - 1 ? (
         <View style={styles.navBar}>
-          <TouchableOpacity onPress={() => router.replace('/auth')}>
+          <TouchableOpacity onPress={() => {
+            onboardingService.markOnboardingCompleted();
+            router.replace('/auth');
+          }}>
             <Text style={styles.skip}>Skip</Text>
           </TouchableOpacity>
 
@@ -274,9 +280,12 @@ export default function OnboardingScreen() {
         </View>
       ) : (
         <View style={styles.ctaWrap}>
-          <TouchableOpacity style={styles.cta} onPress={() => router.replace('/auth')}>
+          <TouchableOpacity style={styles.cta} onPress={() => {
+            onboardingService.markOnboardingCompleted();
+            router.replace('/auth');
+          }}>
             <Image
-              source={require('@/assets/images/VetPaw icon.png')}
+              source={require('@/assets/images/PawPal icon.png')}
               style={styles.paw}
               resizeMode="contain"
             />

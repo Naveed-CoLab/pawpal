@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import { Session, User } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+// Removed conflicting supabaseGoogleAuth import - using inAppGoogleAuth instead
 
 // Configure auth redirect URL based on platform
 const redirectUrl = Platform.OS === 'web' 
@@ -45,90 +47,120 @@ class AuthService {
 
   private async initializeAuth() {
     try {
-      console.log('Initializing auth service...');
+      console.log('🚀 Initializing auth service...');
       
-      // Get initial session
+      // Get initial session and validate it
+      console.log('📋 Getting initial session from Supabase...');
       const { data: { session }, error } = await supabase.auth.getSession();
       
       if (error) {
-        console.error('Error getting session:', error);
+        console.error('❌ Error getting session:', error);
+        this.currentSession = null;
+        this.currentUser = null;
+        this.initialized = true;
         this.notifyListeners(null, null);
         return;
       }
 
       if (session) {
-        console.log('Found existing session for:', session.user.email);
-        this.currentSession = session;
+        console.log('✅ Found existing session for:', session.user.email);
         
-        // Try to load user profile with retries
-        let profileLoaded = false;
-        for (let attempt = 0; attempt < 3 && !profileLoaded; attempt++) {
-          try {
-            await this.loadUserProfile(session.user);
-            if (this.currentUser) {
-              profileLoaded = true;
-              console.log(`User profile loaded successfully on attempt ${attempt + 1}`);
-            } else {
-              console.log(`User profile not loaded on attempt ${attempt + 1}, retrying...`);
-              await new Promise(resolve => setTimeout(resolve, 500));
+        // Validate that the session is still valid
+        try {
+          const { data: { user }, error: userError } = await supabase.auth.getUser();
+          
+          if (userError || !user) {
+            console.warn('⚠️ Session found but user validation failed, clearing session');
+            this.currentSession = null;
+            this.currentUser = null;
+          } else {
+            console.log('✅ Session validated successfully');
+            this.currentSession = session;
+            
+            // Try to load user profile, but don't fail initialization if it doesn't work
+            try {
+              await this.loadUserProfile(session.user);
+              console.log('✅ User profile loaded successfully during initialization');
+            } catch (profileError) {
+              console.warn('⚠️ Failed to load user profile during initialization, creating minimal user object:', profileError);
+              // Create a minimal user object from session data if profile loading fails
+              this.currentUser = {
+                id: session.user.id,
+                auth_user_id: session.user.id,
+                email: session.user.email || '',
+                full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || '',
+                provider: (session.user.app_metadata?.provider === 'google' ? 'google' : 
+                          session.user.app_metadata?.provider === 'facebook' ? 'facebook' : 'email') as 'email' | 'google' | 'facebook',
+                created_at: session.user.created_at,
+                last_login: new Date().toISOString(),
+              };
+              console.log('✅ Created minimal user object from session data during initialization');
             }
-          } catch (profileError) {
-            console.error(`Error loading profile on attempt ${attempt + 1}:`, profileError);
-            if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500));
           }
-        }
-        
-        if (!profileLoaded) {
-          console.error('Failed to load user profile after multiple attempts');
+        } catch (validationError) {
+          console.error('❌ Session validation failed during initialization:', validationError);
+          this.currentSession = null;
+          this.currentUser = null;
         }
       } else {
-        console.log('No existing session found');
+        console.log('ℹ️ No existing session found');
         this.currentSession = null;
         this.currentUser = null;
       }
 
       // Listen for auth changes
       supabase.auth.onAuthStateChange(async (event, session) => {
-        console.log('Auth state change:', event, session?.user?.email);
+        console.log('🔄 Auth state change:', event, session?.user?.email);
         
         this.currentSession = session;
         
         if (session?.user) {
-          // Wait a bit for the trigger to complete
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          // Try to load user profile with retries
-          let profileLoaded = false;
-          for (let attempt = 0; attempt < 3 && !profileLoaded; attempt++) {
-            try {
-              await this.loadUserProfile(session.user);
-              if (this.currentUser) {
-                profileLoaded = true;
-                console.log(`User profile loaded successfully on auth change, attempt ${attempt + 1}`);
-              } else {
-                console.log(`User profile not loaded on auth change, attempt ${attempt + 1}, retrying...`);
-                await new Promise(resolve => setTimeout(resolve, 500));
-              }
-            } catch (profileError) {
-              console.error(`Error loading profile on auth change, attempt ${attempt + 1}:`, profileError);
-              if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500));
-            }
-          }
-          
-          if (!profileLoaded) {
-            console.error('Failed to load user profile after auth change');
+          console.log('👤 Processing user session...');
+          // Try to load user profile, but don't fail if it doesn't work
+          try {
+            await this.loadUserProfile(session.user);
+            console.log('✅ User profile loaded successfully on auth change');
+          } catch (profileError) {
+            console.warn('⚠️ Failed to load user profile on auth change, creating minimal user object:', profileError);
+            // Create a minimal user object from session data if profile loading fails
+            this.currentUser = {
+              id: session.user.id,
+              auth_user_id: session.user.id,
+              email: session.user.email || '',
+              full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || '',
+              provider: (session.user.app_metadata?.provider === 'google' ? 'google' : 
+                        session.user.app_metadata?.provider === 'facebook' ? 'facebook' : 'email') as 'email' | 'google' | 'facebook',
+              created_at: session.user.created_at,
+              last_login: new Date().toISOString(),
+            };
+            console.log('✅ Created minimal user object from session data on auth change');
           }
         } else {
+          console.log('🚫 No user in session');
           this.currentUser = null;
         }
+        
+        console.log('📢 Notifying listeners:', {
+          hasUser: !!this.currentUser,
+          userEmail: this.currentUser?.email,
+          hasSession: !!this.currentSession
+        });
         
         this.notifyListeners(this.currentUser, this.currentSession);
       });
 
+      console.log('🎯 Auth initialization complete:', {
+        hasUser: !!this.currentUser,
+        hasSession: !!this.currentSession,
+        userEmail: this.currentUser?.email
+      });
+      
       this.initialized = true;
       this.notifyListeners(this.currentUser, this.currentSession);
     } catch (error) {
-      console.error('Error initializing auth:', error);
+      console.error('❌ Error initializing auth:', error);
+      this.currentSession = null;
+      this.currentUser = null;
       this.initialized = true;
       this.notifyListeners(null, null);
     }
@@ -223,7 +255,7 @@ class AuthService {
 
       if (error) {
         // If upsert fails due to email conflict, try to update existing record
-        if (error.code === '23505' && error.message.includes('users_email_key')) {
+        if (error.code === '23505' && error.message && error.message.includes('users_email_key')) {
           console.log('Email conflict detected, attempting to update existing user...');
           
           // Find the existing user by email and update their auth_user_id
@@ -340,33 +372,22 @@ class AuthService {
   // Social Authentication
   async signInWithGoogle() {
     try {
-      console.log(`Starting Google sign-in on ${Platform.OS}...`);
+      console.log('🚀 Starting optimized Google sign-in...');
       
-      // Configure different options based on platform
-      const options = {
-        redirectTo: redirectUrl,
-        queryParams: Platform.OS !== 'web' ? { platform: 'mobile' } : undefined
-      };
+      // Use the optimized Google auth service
+      const { optimizedGoogleAuth } = await import('./googleAuthServiceOptimized');
+      const result = await optimizedGoogleAuth.signIn();
       
-      console.log('Google sign-in options:', options);
-      
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: options
-      });
-
-      if (error) throw error;
-      
-      // For mobile, we need to handle the redirect flow
-      if (Platform.OS !== 'web' && data?.url) {
-        console.log('Opening OAuth URL:', data.url);
-        // The URL will be handled by the app's deep linking
+      if (result.success) {
+        console.log('✅ Optimized Google sign-in successful');
+        return { data: result.user, error: null };
+      } else {
+        console.error('❌ Optimized Google sign-in failed:', result.error);
+        return { data: null, error: result.error || 'Google sign-in failed' };
       }
-      
-      return { data, error: null };
     } catch (error: any) {
-      console.error("Google sign in error:", error);
-      return { data: null, error: error.message };
+      console.error('❌ Optimized Google sign-in error:', error);
+      return { data: null, error: error.message || 'Google sign-in failed' };
     }
   }
 
@@ -407,6 +428,40 @@ class AuthService {
     }
   }
 
+  // Alternative password reset for debugging
+  async resetPasswordAlternative(email: string) {
+    try {
+      console.log('🔄 Trying alternative password reset approach...');
+      
+      // Try with different redirect formats
+      const redirectOptions = [
+        'vetpaw://auth/reset-password',
+        'vetpaw://auth-callback',
+        'com.vetpaw.vetpawaiapp://auth/reset-password',
+      ];
+
+      for (const redirectUrl of redirectOptions) {
+        console.log(`📧 Attempting reset with redirect: ${redirectUrl}`);
+        
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: redirectUrl,
+        });
+
+        if (!error) {
+          console.log(`✅ Password reset sent successfully with redirect: ${redirectUrl}`);
+          return { error: null, redirectUsed: redirectUrl };
+        } else {
+          console.log(`❌ Failed with redirect ${redirectUrl}:`, error.message);
+        }
+      }
+
+      throw new Error('All redirect URL attempts failed');
+    } catch (error: any) {
+      console.error('❌ Alternative password reset failed:', error);
+      return { error: error.message };
+    }
+  }
+
   // Update Password
   async updatePassword(newPassword: string) {
     try {
@@ -418,6 +473,65 @@ class AuthService {
       return { error: null };
     } catch (error: any) {
       return { error: error.message };
+    }
+  }
+
+  // Set session from password reset tokens
+  async setSessionFromTokens(accessToken: string, refreshToken: string) {
+    try {
+      console.log('=== SET SESSION FROM TOKENS DEBUG ===');
+      console.log('Access token received:', accessToken ? 'YES' : 'NO');
+      console.log('Refresh token received:', refreshToken ? 'YES' : 'NO');
+      console.log('Access token length:', accessToken?.length);
+      console.log('Refresh token length:', refreshToken?.length);
+      console.log('Access token preview:', accessToken?.substring(0, 50) + '...');
+      console.log('Refresh token preview:', refreshToken?.substring(0, 50) + '...');
+      
+      const { data: { session }, error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+
+      console.log('Supabase setSession result:');
+      console.log('- Session:', session ? 'CREATED' : 'NULL');
+      console.log('- Error:', error ? error.message : 'NONE');
+      
+      if (error) {
+        console.error('❌ Supabase setSession error details:', {
+          message: error.message,
+          status: error.status,
+        });
+        throw error;
+      }
+
+      if (!session) {
+        console.error('❌ No session returned from setSession');
+        throw new Error('No session returned from tokens');
+      }
+
+      console.log('✅ Session created successfully:');
+      console.log('- User ID:', session.user.id);
+      console.log('- User email:', session.user.email);
+      console.log('- Expires at:', new Date(session.expires_at! * 1000).toISOString());
+      
+      this.currentSession = session;
+      
+      // Load user profile
+      if (session.user) {
+        console.log('📝 Loading user profile...');
+        await this.loadUserProfile(session.user);
+        console.log('✅ User profile loaded');
+      }
+      
+      this.notifyListeners(this.currentUser, this.currentSession);
+      return { session, error: null };
+    } catch (error: any) {
+      console.error('❌ Failed to set session from tokens:', {
+        message: error.message,
+        stack: error.stack,
+        errorObject: error,
+      });
+      return { session: null, error: error.message };
     }
   }
 
@@ -478,10 +592,10 @@ class AuthService {
     }
   }
 
-  // Sign Out
+  // Sign Out - Enhanced to clear all session data
   async signOut() {
     try {
-      console.log('AuthService: Starting sign out process');
+      console.log('AuthService: Starting enhanced sign out process');
       
       // Clear local state first to ensure UI updates immediately
       this.currentSession = null;
@@ -489,6 +603,25 @@ class AuthService {
       
       // Notify listeners immediately of state change
       this.notifyListeners(null, null);
+      
+      // Clear all auth-related AsyncStorage data
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const authKeys = keys.filter(key => 
+          key.includes('supabase') || 
+          key.includes('auth') ||
+          key.includes('session') ||
+          key.includes('token') ||
+          key.includes('user')
+        );
+        
+        if (authKeys.length > 0) {
+          await AsyncStorage.multiRemove(authKeys);
+          console.log('AuthService: Cleared AsyncStorage keys:', authKeys);
+        }
+      } catch (storageError) {
+        console.warn('AuthService: Error clearing AsyncStorage:', storageError);
+      }
       
       // Sign out from Supabase with timeout protection
       const timeoutPromise = new Promise((_, reject) => {
@@ -509,14 +642,23 @@ class AuthService {
         console.warn('AuthService: Supabase signOut timed out, but local state is cleared');
       }
 
-      // Ensure we clear any persisted session data
+      // Force clear any remaining session data
       try {
+        // This will force Supabase to clear any cached session
         await supabase.auth.getSession();
       } catch (error) {
         console.log('AuthService: Session already cleared');
       }
 
-      console.log('AuthService: Sign out process completed');
+      // Additional cleanup: Clear any remaining auth state
+      try {
+        // Force refresh the auth state to ensure it's cleared
+        await supabase.auth.refreshSession();
+      } catch (error) {
+        console.log('AuthService: Session refresh failed (expected after logout)');
+      }
+
+      console.log('AuthService: Enhanced sign out process completed');
       return { error: null };
     } catch (error: any) {
       console.error('AuthService: Sign out error:', error);
@@ -547,7 +689,7 @@ class AuthService {
     return this.initialized;
   }
 
-  // Session validation
+  // Session validation - optimized for speed and strict logout handling
   async validateSession(): Promise<boolean> {
     try {
       // Only log once per second at most
@@ -557,63 +699,156 @@ class AuthService {
         this._lastValidationLog = now;
       }
       
-      // Try up to 3 times to validate the session
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const { data: { session }, error } = await supabase.auth.getSession();
-          
-          if (error) {
-            console.error(`Session validation error (attempt ${attempt + 1}/3):`, error);
-            // Wait before retrying
-            if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500));
-            continue;
-          }
-          
-          if (!session) {
-            console.log('No active session found');
-            this.currentSession = null;
-            this.currentUser = null;
-            this.notifyListeners(null, null);
-            return false;
-          }
+      // Quick session check with timeout
+      const sessionPromise = supabase.auth.getSession();
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Session check timeout')), 2000)
+      );
+      
+      const { data: { session: currentSession }, error } = await Promise.race([
+        sessionPromise,
+        timeoutPromise
+      ]);
+      
+      if (error) {
+        console.error('Session validation error:', error);
+        this.currentSession = null;
+        this.currentUser = null;
+        this.notifyListeners(null, null);
+        return false;
+      }
+      
+      if (!currentSession) {
+        console.log('No active session found');
+        this.currentSession = null;
+        this.currentUser = null;
+        this.notifyListeners(null, null);
+        return false;
+      }
 
-          // Check if token is expired
-          const nowTimestamp = Math.floor(Date.now() / 1000);
-          if (session.expires_at && session.expires_at < nowTimestamp) {
-            console.log('Session token expired, signing out');
+      // Additional check: Verify the session is not expired
+      const nowTimestamp = Math.floor(Date.now() / 1000);
+      if (currentSession.expires_at && currentSession.expires_at < nowTimestamp) {
+        console.log('Session has expired, clearing session data');
+        this.currentSession = null;
+        this.currentUser = null;
+        this.notifyListeners(null, null);
+        
+        // Clear expired session from storage
+        try {
+          await supabase.auth.signOut({ scope: 'local' });
+        } catch (signOutError) {
+          console.warn('Error clearing expired session:', signOutError);
+        }
+        
+        return false;
+      }
+
+      let validSession = currentSession;
+
+      // Quick token expiration check
+      if (validSession.expires_at && validSession.expires_at < nowTimestamp) {
+        console.log('Session token expired, attempting refresh...');
+        try {
+          const refreshPromise = supabase.auth.refreshSession();
+          const refreshTimeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Refresh timeout')), 3000)
+          );
+          
+          const { data: refreshData, error: refreshError } = await Promise.race([
+            refreshPromise,
+            refreshTimeoutPromise
+          ]);
+          
+          if (refreshError || !refreshData.session) {
+            console.log('Session refresh failed, signing out');
             await this.signOut();
             return false;
           }
-
-          this.currentSession = session;
-          if (!this.currentUser && session.user) {
-            await this.loadUserProfile(session.user);
-          }
-
-          this.notifyListeners(this.currentUser, this.currentSession);
-          
-          // Only log success once per minute at most
-          if (!this._lastSuccessLog || now - this._lastSuccessLog > 60000) {
-            console.log('Session validated successfully');
-            this._lastSuccessLog = now;
-          }
-          
-          return true;
-        } catch (attemptError) {
-          console.error(`Session validation attempt ${attempt + 1}/3 failed:`, attemptError);
-          if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500));
+          validSession = refreshData.session;
+          console.log('Session refreshed successfully');
+        } catch (refreshError) {
+          console.error('Session refresh error:', refreshError);
+          await this.signOut();
+          return false;
         }
       }
+
+      this.currentSession = validSession;
       
-      // If we get here, all attempts failed
-      console.error('All session validation attempts failed');
+      // Fast user profile loading with immediate fallback
+      if (!this.currentUser && validSession.user) {
+        try {
+          // Create minimal user object immediately for fast response
+          this.currentUser = {
+            id: validSession.user.id,
+            auth_user_id: validSession.user.id,
+            email: validSession.user.email || '',
+            name: validSession.user.user_metadata?.full_name || validSession.user.user_metadata?.name || '',
+            full_name: validSession.user.user_metadata?.full_name || validSession.user.user_metadata?.name || validSession.user.email?.split('@')[0] || '',
+            provider: (validSession.user.app_metadata?.provider === 'google' ? 'google' : 
+                      validSession.user.app_metadata?.provider === 'facebook' ? 'facebook' : 'email') as 'email' | 'google' | 'facebook',
+            created_at: validSession.user.created_at,
+            last_login: new Date().toISOString(),
+          };
+          
+          console.log('✅ Created minimal user object for immediate use');
+          
+          // Notify listeners immediately with minimal user data
+          this.notifyListeners(this.currentUser, this.currentSession);
+          
+          // Load full profile in background (don't block validation)
+          setTimeout(() => {
+            this.loadUserProfileInBackground(validSession.user).catch(err => 
+              console.warn('Background profile load failed:', err)
+            );
+          }, 100);
+          
+          return true; // Return immediately with minimal user data
+        } catch (profileError) {
+          console.warn('Error creating minimal user object:', profileError);
+          // Still return true if we have a valid session
+          return true;
+        }
+      }
+
+      this.notifyListeners(this.currentUser, this.currentSession);
+      
+      // Only log success once per minute at most
+      if (!this._lastSuccessLog || now - this._lastSuccessLog > 60000) {
+        console.log('Session validated successfully');
+        this._lastSuccessLog = now;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('Session validation failed:', error);
       this.currentSession = null;
       this.currentUser = null;
       this.notifyListeners(null, null);
       return false;
+    }
+  }
+
+  // Background profile loading - doesn't block session validation
+  private async loadUserProfileInBackground(user: User) {
+    try {
+      console.log('Loading user profile in background for:', user.email);
+      
+      // Quick profile check with timeout
+      const profilePromise = this.loadUserProfile(user);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Profile load timeout')), 5000)
+      );
+      
+      await Promise.race([profilePromise, timeoutPromise]);
+      console.log('Background profile load completed');
+      
+      // Update listeners with full profile data
+      this.notifyListeners(this.currentUser, this.currentSession);
     } catch (error) {
-      console.error('Unexpected error validating session:', error);
-      return false;
+      console.warn('Background profile load failed:', error);
+      // Don't fail the session validation if profile loading fails
     }
   }
 
@@ -631,6 +866,61 @@ class AuthService {
       return { session: null, error: error.message };
     }
   }
+
+  // Verify password reset token directly
+  async verifyPasswordResetToken(token: string) {
+    try {
+      console.log('=== VERIFY PASSWORD RESET TOKEN ===');
+      console.log('Token received:', token ? 'YES' : 'NO');
+      console.log('Token length:', token?.length);
+      console.log('Token preview:', token?.substring(0, 20) + '...');
+      
+      const { data, error } = await supabase.auth.verifyOtp({
+        token_hash: token,
+        type: 'recovery',
+      });
+
+      console.log('Supabase verifyOtp result:');
+      console.log('- Session:', data.session ? 'CREATED' : 'NULL');
+      console.log('- User:', data.user ? 'FOUND' : 'NULL');
+      console.log('- Error:', error ? error.message : 'NONE');
+      
+      if (error) {
+        console.error('❌ Token verification error:', error);
+        throw error;
+      }
+
+      if (!data.session) {
+        console.error('❌ No session returned from token verification');
+        throw new Error('No session returned from token verification');
+      }
+
+      console.log('✅ Token verified successfully:');
+      console.log('- User ID:', data.session.user.id);
+      console.log('- User email:', data.session.user.email);
+      
+      this.currentSession = data.session;
+      
+      // Load user profile
+      if (data.session.user) {
+        console.log('📝 Loading user profile...');
+        await this.loadUserProfile(data.session.user);
+        console.log('✅ User profile loaded');
+      }
+      
+      this.notifyListeners(this.currentUser, this.currentSession);
+      return { session: data.session, error: null };
+    } catch (error: any) {
+      console.error('❌ Failed to verify password reset token:', {
+        message: error.message,
+        errorObject: error,
+      });
+      return { session: null, error: error.message };
+    }
+  }
 }
 
 export const authService = AuthService.getInstance();
+
+// useGoogleLogin hook removed - using inAppGoogleAuth service instead
+// See /lib/googleAuthInApp.ts for the new implementation

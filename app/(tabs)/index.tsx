@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -16,11 +16,33 @@ import { useAuth } from '@/hooks/useAuth';
 import { usePets } from '@/hooks/useDatabase';
 import { useDailyTips } from '@/hooks/useDailyTips';
 import { useMoodLogs } from '@/hooks/useMoodLogs';
+import { useOnboarding } from '@/hooks/useOnboarding';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
-import { ChevronRight, Video, Bell, Sparkles } from 'lucide-react-native';
+import { ChevronRight, Video, Bell, Sparkles, RefreshCw } from 'lucide-react-native';
+import { OnboardingAvatar } from '@/components/ui/OnboardingAvatar';
 
 const { width, height } = Dimensions.get('window');
+
+// Milestone type definition
+interface Milestone {
+  id: string;
+  title: string;
+  message: string;
+  time: string;
+  icon: string;
+  type: 'achievement' | 'subscription' | 'badge' | 'welcome';
+}
+
+// Responsive sizing helpers
+const responsiveWidth = (percentage: number) => (width * percentage) / 100;
+const responsiveHeight = (percentage: number) => (height * percentage) / 100;
+const responsiveFontSize = (size: number) => {
+  const scale = width / 375; // Base on iPhone X width
+  const newSize = size * scale;
+  return Math.max(10, Math.min(newSize, size * 1.2)); // Min 10, max 120% of original
+};
 
 // Static images for tips (we'll cycle through these)
 const tipImages = [
@@ -47,17 +69,23 @@ const getMoodDisplay = (mood: string) => {
 };
 
 export default function HomeScreen() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const { pets, loading: petsLoading, refetch: refetchPets } = usePets();
+  const { isSubscribed } = useSubscriptionStatus();
+  const { currentScreen, updateCurrentScreen, navigateToRoute } = useOnboarding();
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   
-  // Get primary pet info for personalized tips
-  const primaryPet = pets.length > 0 ? pets[0] : null;
+  // Get primary pet info for personalized tips (memoized to prevent re-renders)
+  const primaryPet = useMemo(() => pets.length > 0 ? pets[0] : null, [pets]);
   
   // Get mood logs for the primary pet
   const { moodLogs, getMoodStats } = useMoodLogs();
   
-  // Get latest mood for the primary pet
-  const petMoodLogs = primaryPet ? moodLogs.filter(log => log.pet_id === primaryPet.id) : [];
+  // Get latest mood for the primary pet (memoized to prevent re-renders)
+  const petMoodLogs = useMemo(() => 
+    primaryPet ? moodLogs.filter(log => log.pet_id === primaryPet.id) : [], 
+    [primaryPet, moodLogs]
+  );
   const latestMood = petMoodLogs.length > 0 ? petMoodLogs[0] : null;
   const moodDisplay = latestMood ? getMoodDisplay(latestMood.mood) : getMoodDisplay('happy');
   
@@ -76,14 +104,81 @@ export default function HomeScreen() {
   // Get user name from auth user data
   const userName = user?.name || user?.full_name || 'Pet Parent';
 
-  // Refresh pets data when screen is focused
+  // Get real user milestones based on actual activity (calculated directly with useMemo)
+  const milestones = useMemo((): Milestone[] => {
+    const milestonesArray: Milestone[] = [];
+    
+    // Check if user added their first pet
+    if (pets.length > 0) {
+      milestonesArray.push({
+        id: 'first-pet',
+        title: 'First Pet Added! 🐕',
+        message: `You added ${pets[0].name} to your PawPal family!`,
+        time: 'Recently',
+        icon: '🐕',
+        type: 'achievement'
+      });
+    }
+    
+    // Check if user is subscribed
+    if (isSubscribed) {
+      milestonesArray.push({
+        id: 'premium-subscription',
+        title: 'Premium Unlocked! 👑',
+        message: 'You now have access to all premium features including Luna coaching!',
+        time: 'Recently', 
+        icon: '👑',
+        type: 'subscription'
+      });
+    }
+    
+    // Check if user has mood logs (engagement badge)
+    if (petMoodLogs.length > 0) {
+      milestonesArray.push({
+        id: 'mood-tracker',
+        title: 'Mood Tracker Badge! 📸',
+        message: `You've been tracking ${primaryPet?.name || 'your pet'}'s mood regularly!`,
+        time: 'Recently',
+        icon: '🏆',
+        type: 'badge'
+      });
+    }
+    
+    // Welcome message for new users
+    if (milestonesArray.length === 0) {
+      milestonesArray.push({
+        id: 'welcome',
+        title: 'Welcome to PawPal! 🎉',
+        message: 'Start by adding your first pet to unlock achievements and features!',
+        time: 'Now',
+        icon: '👋',
+        type: 'welcome'
+      });
+    }
+    
+    return milestonesArray;
+  }, [pets, isSubscribed, petMoodLogs, primaryPet]);
+
+  // Refresh pets data when screen is focused (no longer includes milestone calculation)
   useFocusEffect(
     useCallback(() => {
       // Add conditional check to ensure refetchPets is a function before calling it
       if (refetchPets && typeof refetchPets === 'function') {
         refetchPets();
       }
-    }, [refetchPets])
+      
+      // Update current screen for onboarding
+      updateCurrentScreen('home');
+      
+      // Check if this might be a new user and trigger onboarding check
+      if (user?.id) {
+        // Add a small delay to ensure components are mounted
+        setTimeout(() => {
+          console.log('🏠 Homepage: User detected, checking onboarding status');
+          // The OnboardingAvatar component will handle the actual check
+        }, 500);
+      }
+    }, [refetchPets, updateCurrentScreen, user?.id])
   );
   
   // Get pet display info
@@ -103,14 +198,19 @@ export default function HomeScreen() {
         router.push('/(tabs)/health');
         break;
       case 'notifications':
-        // Navigate to notifications screen or show notifications modal
-        console.log('Opening notifications...');
+        // Open the notification modal
+        setShowNotificationModal(true);
         break;
       case 'snap-mood':
         router.push('/(tabs)/mood');
         break;
       case 'add-pet':
         router.push('/pets/add');
+        break;
+      case 'behavior-coach':
+      case 'behavior-trends':
+      case 'trends':
+        router.push('/(tabs)/trends');
         break;
       default:
         // For now, navigate to a 404 page - you can replace these later
@@ -153,7 +253,7 @@ export default function HomeScreen() {
         <View style={styles.topHeader}>
           <View style={styles.logoContainer}>
             <Image 
-              source={require('@/assets/images/VetPaw Ai Logo.png')} 
+              source={require('@/assets/images/PawPal Ai Logo.png')} 
               style={styles.appLogo} 
               resizeMode="contain"
             />
@@ -161,20 +261,30 @@ export default function HomeScreen() {
           
           <TouchableOpacity 
             style={styles.notificationButton}
-            onPress={() => handleFeaturePress('notifications')}
+            onPress={() => setShowNotificationModal(true)}
           >
-                          <Bell size={24} color="#47463e" />
-            {/* Notification badge - show when there are unread notifications */}
-            <View style={styles.notificationBadge}>
-              <Text style={styles.badgeText}>3</Text>
-            </View>
+            <Bell size={24} color="#47463e" />
+            {/* Show milestone count */}
+            {milestones.length > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.badgeText}>{milestones.length > 99 ? '99+' : String(milestones.length)}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          
+          {/* Feedback Icon */}
+          <TouchableOpacity 
+            style={styles.feedbackButton}
+            onPress={() => router.push('/feedback')}
+          >
+            <Text style={styles.feedbackIcon}>💬</Text>
           </TouchableOpacity>
         </View>
 
         {/* Enhanced Welcome Header */}
         <View style={styles.welcomeHeader}>
           <View style={styles.welcomeContent}>
-            <Text style={styles.welcomeText}>Welcome back, {userName.split(' ')[0]}!</Text>
+            <Text style={styles.welcomeText}>Welcome back, {(userName || 'Pet Parent').split(' ')[0]}!</Text>
             {primaryPet && (
               <Text style={styles.welcomeSubtext}>How's {primaryPet.name} today? 🐕</Text>
             )}
@@ -217,8 +327,8 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Weight</Text>
-                  <Text style={styles.statValue}>{primaryPet.weight || '?'} kg</Text>
+                  <Text style={styles.statLabel}>Gender</Text>
+                  <Text style={styles.statValue}>{primaryPet.gender || '?'}</Text>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
@@ -246,7 +356,7 @@ export default function HomeScreen() {
               style={[styles.featureCard, styles.heroCard]}
               onPress={() => handleFeaturePress('live-coaching')}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Live Coaching: Talk to James, expert dog coach"
+              accessibilityLabel="Live Mentor: Talk to Luna, expert dog mentor"
               accessibilityRole="button"
             >
               <View style={styles.heroContent}>
@@ -255,9 +365,9 @@ export default function HomeScreen() {
                     <Video size={32} color={Colors.white} />
                   </View>
                   <View style={styles.heroTextContainer}>
-                    <Text style={styles.heroTitle}>Live Coaching</Text>
-                    <Text style={styles.heroSubtext}>Get real-time dog coaching (4-5 min)</Text>
-                    <Text style={styles.heroDescription}>Talk to James, our expert vet coach!</Text>
+                    <Text style={styles.heroTitle}>Live Mentor</Text>
+                    <Text style={styles.heroSubtext}>Get real-time dog mentorship (4-5 min)</Text>
+                    <Text style={styles.heroDescription}>Talk to Luna, our expert dog mentor!</Text>
                   </View>
                 </View>
                 <TouchableOpacity 
@@ -282,7 +392,7 @@ export default function HomeScreen() {
             >
               <View style={styles.featureContent}>
                 <Image
-                  source={require('@/assets/images/symptoms.png')}
+                  source={require('@/assets/images/symptom checker.png')}
                   style={styles.featureIcon}
                   resizeMode="contain"
                 />
@@ -292,18 +402,18 @@ export default function HomeScreen() {
 
             <TouchableOpacity 
               style={styles.featureCard}
-              onPress={() => handleFeaturePress('feeding-guide')}
+              onPress={() => handleFeaturePress('ai-chat')}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Feeding Guide: Get nutrition advice for your dog"
+              accessibilityLabel="Chat with Lumi: AI Dog Health Care Specialist "
               accessibilityRole="button"
             >
               <View style={styles.featureContent}>
                 <Image
-                  source={require('@/assets/images/Feedign Guide.png')}
+                  source={require('@/assets/images/lumi.png')}
                   style={styles.featureIcon}
                   resizeMode="contain"
                 />
-                <Text style={styles.featureText}>Feeding{'\n'}Guide</Text>
+                <Text style={styles.featureText}>Chat With {'\n'}Lumi</Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -318,9 +428,11 @@ export default function HomeScreen() {
               accessibilityRole="button"
             >
               <View style={styles.featureContent}>
-                <View style={styles.snapMoodIcon}>
-                  <Text style={styles.snapMoodEmoji}>📸</Text>
-                </View>
+              <Image
+                  source={require('@/assets/images/snap my mood.png')}
+                  style={styles.featureIcon}
+                  resizeMode="contain"
+                />
                 <Text style={styles.featureText}>Snap{'\n'}My Mood</Text>
               </View>
             </TouchableOpacity>
@@ -334,11 +446,11 @@ export default function HomeScreen() {
             >
               <View style={styles.featureContent}>
                 <Image
-                  source={require('@/assets/images/behaviour coach.png')}
+                  source={require('@/assets/images/behavior trend.png')}
                   style={styles.featureIcon}
                   resizeMode="contain"
                 />
-                <Text style={styles.featureText}>Behavior{'\n'}Coach</Text>
+                <Text style={styles.featureText}>Behavior{'\n'}Trend</Text>
               </View>
             </TouchableOpacity>
           </View>
@@ -388,6 +500,50 @@ export default function HomeScreen() {
 
 
       </ScrollView>
+            
+      {/* Simple Milestones Modal */}
+      {showNotificationModal && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Your PawPal Journey 🎉</Text>
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => setShowNotificationModal(false)}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.milestonesList}>
+              {milestones.map((milestone) => (
+                <View key={milestone.id} style={styles.milestoneItem}>
+                  <View style={styles.milestoneIcon}>
+                    <Text style={styles.milestoneEmoji}>{milestone.icon}</Text>
+                  </View>
+                  <View style={styles.milestoneContent}>
+                    <Text style={styles.milestoneTitle}>{milestone.title}</Text>
+                    <Text style={styles.milestoneMessage}>{milestone.message}</Text>
+                    <Text style={styles.milestoneTime}>{milestone.time}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+            
+            <TouchableOpacity 
+              style={styles.modalCloseButton}
+              onPress={() => setShowNotificationModal(false)}
+            >
+              <Text style={styles.modalCloseButtonText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+      
+      {/* Onboarding Avatar for First-Time Users */}
+      <OnboardingAvatar 
+        currentScreen="home"
+      />
     </View>
   );
 }
@@ -421,27 +577,28 @@ const styles = StyleSheet.create({
   },
   notificationBadge: {
     position: 'absolute',
-    top: 2,
-    right: 2,
+    top: 4,
+    right: 4,
     backgroundColor: '#ff9d00', // VetPaw peachy orange
-    borderRadius: 12,
-    minWidth: 20,
-    height: 20,
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: '#FFF8E1',
     shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
   badgeText: {
     color: 'white',
-    fontSize: 10,
+    fontSize: 8,
     fontFamily: Fonts.body.bold,
     textAlign: 'center',
+    lineHeight: 10,
   },
   welcomeHeader: {
     flexDirection: 'row',
@@ -473,33 +630,34 @@ const styles = StyleSheet.create({
   // Enhanced Dog Profile Widget
   dogProfileWidget: {
     backgroundColor: '#fff4bb',
-    marginHorizontal: 20,
-    marginBottom: 24,
-    borderRadius: 24,
-    padding: 20,
+    marginHorizontal: responsiveWidth(5),
+    marginBottom: responsiveHeight(3),
+    borderRadius: responsiveWidth(6),
+    padding: responsiveWidth(5),
     flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: '#8B4513',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
     borderWidth: 2,
-    borderColor: '#ffe4cc',
+    borderColor: '#D7B899',
+    minHeight: responsiveHeight(12),
   },
   dogAvatarContainer: {
     position: 'relative',
-    marginRight: 16,
+    marginRight: responsiveWidth(4),
   },
   progressRing: {
     position: 'absolute',
-    top: -6,
-    left: -6,
-    width: 92,
-    height: 92,
-    borderRadius: 46,
-    borderWidth: 3,
-    borderColor: '#ffe8d6',
+    top: -responsiveWidth(1.5),
+    left: -responsiveWidth(1.5),
+    width: responsiveWidth(23),
+    height: responsiveWidth(23),
+    borderRadius: responsiveWidth(11.5),
+    borderWidth: 0,
+    borderColor: 'transparent',
     overflow: 'hidden',
   },
   progressFill: {
@@ -512,99 +670,106 @@ const styles = StyleSheet.create({
     transformOrigin: 'right center',
   },
   dogAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    marginRight: 16,
-    borderWidth: 3,
-    borderColor: '#ffb366',
-    shadowColor: '#8B4513',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 4,
+    width: responsiveWidth(20),
+    height: responsiveWidth(20),
+    borderRadius: responsiveWidth(10),
+    borderWidth: 0,
+    borderColor: 'transparent',
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   moodIndicator: {
     position: 'absolute',
-    bottom: -2,
-    right: -2,
+    bottom: -responsiveWidth(0.5),
+    right: -responsiveWidth(0.5),
     backgroundColor: '#4CAF50',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
+    borderRadius: responsiveWidth(3),
+    width: responsiveWidth(6),
+    height: responsiveWidth(6),
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff2e6',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   moodEmoji: {
-    fontSize: 12,
+    fontSize: responsiveFontSize(12),
   },
   dogInfoSection: {
     flex: 1,
+    justifyContent: 'center',
   },
   quickStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: responsiveHeight(1),
     backgroundColor: '#ffe98a',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: responsiveWidth(3),
+    paddingHorizontal: responsiveWidth(3),
+    paddingVertical: responsiveHeight(1),
+    minHeight: responsiveHeight(5),
   },
   statItem: {
     alignItems: 'center',
     flex: 1,
+    paddingVertical: responsiveHeight(0.5),
   },
   statLabel: {
-    fontSize: 10,
+    fontSize: responsiveFontSize(10),
     fontFamily: Fonts.body.medium,
     color: '#544c3a',
     opacity: 0.7,
     textTransform: 'uppercase',
+    textAlign: 'center',
+    lineHeight: responsiveFontSize(12),
   },
   statValue: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.bold,
     color: '#544c3a',
-    marginTop: 2,
+    marginTop: responsiveHeight(0.3),
+    textAlign: 'center',
+    lineHeight: responsiveFontSize(16),
+    flexWrap: 'wrap',
+    maxWidth: responsiveWidth(20),
   },
   statDivider: {
     width: 1,
-    height: 20,
+    height: responsiveHeight(2.5),
     backgroundColor: '#ffe8d6',
-    marginHorizontal: 8,
-  },
-  dogInfoText: {
-    flex: 1,
+    marginHorizontal: responsiveWidth(2),
   },
   dogName: {
-    fontSize: 20,
+    fontSize: responsiveFontSize(20),
     fontFamily: Fonts.heading.bold,
     color: '#544c3a',
-    marginBottom: 2,
+    marginBottom: responsiveHeight(0.3),
+    lineHeight: responsiveFontSize(24),
   },
   dogBreed: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.medium,
     color: '#544c3a',
-    marginBottom: 6,
+    marginBottom: responsiveHeight(0.8),
+    lineHeight: responsiveFontSize(16),
   },
   ownerName: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
     color: '#544c3a',
   },
   addPetButton: {
-    marginTop: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+    marginTop: responsiveHeight(0.8),
+    paddingVertical: responsiveHeight(1),
+    paddingHorizontal: responsiveWidth(4),
     backgroundColor: '#ff9d00',
-    borderRadius: 12,
+    borderRadius: responsiveWidth(3),
     alignSelf: 'flex-start',
   },
   addPetText: {
-    fontSize: 12,
+    fontSize: responsiveFontSize(12),
     fontFamily: Fonts.body.bold,
     color: Colors.white,
   },
@@ -616,13 +781,13 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     height: 90,
     borderRadius: 24,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 8,
-    borderWidth: 2,
-    borderColor: '#9d6a47',
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+    borderWidth: 0,
+    borderColor: 'transparent',
     padding: 20,
   },
   featuredContent: {
@@ -678,13 +843,13 @@ const styles = StyleSheet.create({
     height: 110,
     borderRadius: 20,
     padding: 16,
-    shadowColor: '#8B4513',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 5,
-    borderWidth: 1.5,
-    borderColor: '#ffe8d6',
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
   },
   featureContent: {
     flexDirection: 'row',
@@ -773,13 +938,13 @@ const styles = StyleSheet.create({
     marginRight: 14,
     backgroundColor: '#fff4bb',
     borderRadius: 16,
-    shadowColor: '#8B4513',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: '#f5d982',
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+    borderWidth: 1.5,
+    borderColor: '#D7B899',
   },
   errorText: {
     fontSize: 14,
@@ -811,13 +976,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 18,
     marginRight: 14,
-    shadowColor: '#8B4513',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 3,
-    borderWidth: 1,
-    borderColor: '#f5d982',
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
+    borderWidth: 1.5,
+    borderColor: '#D7B899',
   },
   tipContent: {
     flexDirection: 'row',
@@ -903,9 +1068,8 @@ const styles = StyleSheet.create({
     width: '100%', // Take full width of the row container
     minHeight: 140, // Increased for better text space
     borderRadius: 20, // Match other feature cards
-
-    borderWidth: 2.5, // Slightly thicker border for emphasis
-    borderColor: '#f5d982', // Primary color border for CTA emphasis
+    borderWidth: 2,
+    borderColor: '#D7B899',
     padding: 16,
   },
   heroContent: {
@@ -926,11 +1090,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 8,
     marginRight: 16,
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   heroTextContainer: {
     flex: 1,
@@ -970,11 +1134,11 @@ const styles = StyleSheet.create({
     maxWidth: 100,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   heroButtonText: {
     fontSize: 13, // Slightly larger for CTA
@@ -988,11 +1152,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
-    shadowColor: '#ff9d00',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowColor: 'transparent',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   tipsBadgeText: {
     fontSize: 9,
@@ -1000,5 +1164,138 @@ const styles = StyleSheet.create({
     color: Colors.white,
     letterSpacing: 0.5,
   },
-
-});
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  modalContainer: {
+    backgroundColor: '#fff8e1',
+    borderRadius: 20,
+    padding: 20,
+    width: width * 0.9,
+    maxHeight: height * 0.7,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontFamily: Fonts.heading.bold,
+    color: '#47463e',
+  },
+  closeButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#e6d69a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  closeButtonText: {
+    fontSize: 16,
+    color: '#47463e',
+    fontFamily: Fonts.body.bold,
+  },
+  milestonesList: {
+    maxHeight: height * 0.4,
+  },
+  milestoneItem: {
+    flexDirection: 'row',
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#47463e',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  milestoneIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#fff8e1',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  milestoneEmoji: {
+    fontSize: 24,
+  },
+  milestoneContent: {
+    flex: 1,
+  },
+  milestoneTitle: {
+    fontSize: 16,
+    fontFamily: Fonts.body.bold,
+    color: '#47463e',
+    marginBottom: 4,
+  },
+  milestoneMessage: {
+    fontSize: 14,
+    fontFamily: Fonts.body.regular,
+    color: '#47463e',
+    marginBottom: 4,
+    lineHeight: 20,
+  },
+  milestoneTime: {
+    fontSize: 12,
+    fontFamily: Fonts.body.regular,
+    color: '#666',
+  },
+  modalCloseButton: {
+    backgroundColor: '#ff9d00',
+    borderRadius: 25,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    marginTop: 16,
+  },
+  modalCloseButtonText: {
+    color: Colors.white,
+    fontSize: 16,
+    fontFamily: Fonts.body.semiBold,
+  },
+  debugButton: {
+    position: 'relative',
+    padding: 8,
+    marginLeft: 8,
+    backgroundColor: '#fff8e1',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e6d69a',
+  },
+  feedbackButton: {
+    position: 'relative',
+    padding: 8,
+    marginLeft: 8,
+    backgroundColor: '#fff8e1',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e6d69a',
+    shadowColor: '#47463e',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  feedbackIcon: {
+    fontSize: 20,
+  },
+}); 

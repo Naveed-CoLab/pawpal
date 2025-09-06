@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
 import { Snackbar } from './Snackbar';
+import { NetworkErrorSnackbar } from './NetworkErrorSnackbar';
+import { Linking } from 'react-native';
 
 interface SnackbarContextType {
   showSnackbar: (
@@ -15,6 +17,9 @@ interface SnackbarContextType {
   showNetworkError: (actionText?: string, onActionPress?: () => void) => void;
   showDatabaseError: (actionText?: string, onActionPress?: () => void) => void;
   showPermissionError: (permission: string, actionText?: string, onActionPress?: () => void) => void;
+  showLoginNetworkError: (onRetry?: () => void) => void;
+  showSignupNetworkError: (onRetry?: () => void) => void;
+  showSyncNetworkError: (onRetry?: () => void) => void;
   hideSnackbar: () => void;
 }
 
@@ -32,6 +37,14 @@ export function SnackbarProvider({ children }: SnackbarProviderProps) {
     actionText: undefined as string | undefined,
     onActionPress: undefined as (() => void) | undefined,
     duration: 4000,
+  });
+
+  const [networkSnackbar, setNetworkSnackbar] = useState({
+    isVisible: false,
+    context: 'general' as 'login' | 'signup' | 'data-sync' | 'general',
+    onRetry: undefined as (() => void) | undefined,
+    title: undefined as string | undefined,
+    message: undefined as string | undefined,
   });
 
   const showSnackbar = (
@@ -53,6 +66,14 @@ export function SnackbarProvider({ children }: SnackbarProviderProps) {
 
   const hideSnackbar = () => {
     setSnackbar(prev => ({ ...prev, isVisible: false }));
+    setNetworkSnackbar(prev => ({ ...prev, isVisible: false }));
+  };
+
+  const openNetworkSettings = () => {
+    Linking.openSettings().catch(() => {
+      // Fallback if settings can't be opened
+      showSnackbar('Please check your network settings manually', 'info');
+    });
   };
 
   // Predefined error types for common scenarios
@@ -95,6 +116,37 @@ export function SnackbarProvider({ children }: SnackbarProviderProps) {
     );
   };
 
+  // Specialized network error snackbars
+  const showLoginNetworkError = (onRetry?: () => void) => {
+    setNetworkSnackbar({
+      isVisible: true,
+      context: 'login',
+      onRetry,
+      title: undefined,
+      message: undefined,
+    });
+  };
+
+  const showSignupNetworkError = (onRetry?: () => void) => {
+    setNetworkSnackbar({
+      isVisible: true,
+      context: 'signup',
+      onRetry,
+      title: undefined,
+      message: undefined,
+    });
+  };
+
+  const showSyncNetworkError = (onRetry?: () => void) => {
+    setNetworkSnackbar({
+      isVisible: true,
+      context: 'data-sync',
+      onRetry,
+      title: undefined,
+      message: undefined,
+    });
+  };
+
   const contextValue: SnackbarContextType = {
     showSnackbar,
     showError,
@@ -103,12 +155,17 @@ export function SnackbarProvider({ children }: SnackbarProviderProps) {
     showNetworkError,
     showDatabaseError,
     showPermissionError,
+    showLoginNetworkError,
+    showSignupNetworkError,
+    showSyncNetworkError,
     hideSnackbar,
   };
 
   return (
     <SnackbarContext.Provider value={contextValue}>
       {children}
+      
+      {/* Regular Snackbar */}
       <Snackbar
         message={snackbar.message}
         type={snackbar.type}
@@ -117,6 +174,17 @@ export function SnackbarProvider({ children }: SnackbarProviderProps) {
         actionText={snackbar.actionText}
         onActionPress={snackbar.onActionPress}
         duration={snackbar.duration}
+      />
+      
+      {/* Network Error Snackbar */}
+      <NetworkErrorSnackbar
+        isVisible={networkSnackbar.isVisible}
+        onHide={hideSnackbar}
+        onRetry={networkSnackbar.onRetry}
+        onSettings={openNetworkSettings}
+        context={networkSnackbar.context}
+        title={networkSnackbar.title}
+        message={networkSnackbar.message}
       />
     </SnackbarContext.Provider>
   );
@@ -130,7 +198,7 @@ export function useSnackbar(): SnackbarContextType {
   return context;
 }
 
-// Common error messages for the app
+// Enhanced error messages for the app
 export const ErrorMessages = {
   // Pet-related errors
   PET_CREATION_FAILED: 'Failed to add your pet. Please try again.',
@@ -178,6 +246,11 @@ export const ErrorMessages = {
   // Coaching errors
   COACHING_SESSION_FAILED: 'Failed to start coaching session.',
   RECORDING_FAILED: 'Failed to start recording. Check microphone permissions.',
+
+  // Network-specific errors
+  LOGIN_NETWORK_ERROR: 'Unable to sign in due to network issues. Please check your connection.',
+  SIGNUP_NETWORK_ERROR: 'Account creation failed due to connectivity issues.',
+  SYNC_NETWORK_ERROR: 'Your data could not be synchronized. Check your internet connection.',
 };
 
 // Success messages
@@ -189,4 +262,6 @@ export const SuccessMessages = {
   DATA_SYNCED: 'All your data has been synced successfully!',
   BACKUP_COMPLETE: 'Data backup completed successfully!',
   SETTINGS_SAVED: 'Settings saved successfully!',
+  LOGIN_SUCCESS: 'Welcome back to VetPaw! 🐾',
+  SIGNUP_SUCCESS: 'Account created successfully! Welcome to VetPaw! 🎉',
 }; 

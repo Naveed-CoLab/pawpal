@@ -16,6 +16,7 @@ import { CoachingSessionCard } from '@/components/ui/CoachingSessionCard';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { useAuth } from '@/hooks/useAuth';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { databaseService } from '@/lib/database';
 import { 
   ArrowLeft, 
@@ -54,6 +55,7 @@ interface CoachingSession {
 
 export default function CoachHistoryScreen() {
   const { user } = useAuth();
+  const { isSubscribed, customerInfo, isLoading: subscriptionLoading } = useSubscriptionStatus();
   const [sessions, setSessions] = useState<CoachingSession[]>([]);
   const [summaries, setSummaries] = useState<{ [key: string]: SessionSummary }>({});
   const [loading, setLoading] = useState(true);
@@ -174,6 +176,44 @@ export default function CoachHistoryScreen() {
     }
   };
 
+  const getSessionLimits = () => {
+    console.log('🔍 SESSION LIMITS DEBUG:');
+    console.log('- isSubscribed:', isSubscribed);
+    console.log('- customerInfo:', customerInfo);
+    console.log('- activeSubscriptions:', customerInfo?.activeSubscriptions);
+    
+    if (!isSubscribed) {
+      return { limit: 0, unlimited: false, planName: 'Free' };
+    }
+    
+    // Check if yearly subscription (unlimited)
+    const isYearly = customerInfo?.activeSubscriptions?.some((productId: string) => 
+      productId.includes('yearly') || productId.includes('annual')
+    );
+    
+    console.log('- isYearly:', isYearly);
+    
+    if (isYearly) {
+      return { limit: 0, unlimited: true, planName: 'Yearly Premium' };
+    }
+    
+    // Monthly plan gets 4 sessions per month
+    return { limit: 4, unlimited: false, planName: 'Monthly Premium' };
+  };
+
+  const getCurrentMonthSessions = () => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    
+    return sessions.filter(session => {
+      const sessionDate = new Date(session.created_at);
+      return sessionDate.getMonth() === currentMonth && 
+             sessionDate.getFullYear() === currentYear &&
+             session.status === 'completed';
+    }).length;
+  };
+
   const getSessionStats = () => {
     const completed = sessions.filter(s => s.status === 'completed').length;
     const totalTime = sessions
@@ -188,10 +228,20 @@ export default function CoachHistoryScreen() {
       .filter(s => s.analysis_data?.rating)
       .reduce((sum, s, _, arr) => sum + (s.analysis_data.rating / arr.length), 0);
 
+    const limits = getSessionLimits();
+    const monthlyUsed = getCurrentMonthSessions();
+
+    console.log('📊 STATS DEBUG:');
+    console.log('- limits:', limits);
+    console.log('- monthlyUsed:', monthlyUsed);
+    console.log('- sessions.length:', sessions.length);
+
     return {
       totalSessions: completed,
       totalTime: Math.floor(totalTime / (1000 * 60)), // Convert to minutes
       averageRating: avgRating || 0,
+      sessionLimits: limits,
+      monthlyUsed: monthlyUsed,
     };
   };
 
@@ -243,6 +293,61 @@ export default function CoachHistoryScreen() {
           />
         }
       >
+        {/* Subscription Plan Card */}
+        {!subscriptionLoading && (
+          <View style={styles.subscriptionCardContainer}>
+            <LinearGradient
+              colors={['#ff9d00', '#ffb347']}
+              start={[0, 0]}
+              end={[1, 1]}
+              style={styles.subscriptionCard}
+            >
+              <View style={styles.subscriptionHeader}>
+                <View style={styles.planBadge}>
+                  <Text style={styles.planBadgeText}>{stats.sessionLimits.planName}</Text>
+                </View>
+                {stats.sessionLimits.unlimited ? (
+                  <Text style={styles.unlimitedText}>∞ Unlimited</Text>
+                ) : (
+                  <Text style={styles.sessionCount}>
+                    {Math.max(0, stats.sessionLimits.limit - stats.monthlyUsed)} left this month
+                  </Text>
+                )}
+              </View>
+              
+              <Text style={styles.subscriptionTitle}>
+                {stats.sessionLimits.unlimited 
+                  ? '🌟 Unlimited AI Coaching with Luna' 
+                  : `💎 ${stats.sessionLimits.limit} Sessions per Month with Luna`
+                }
+              </Text>
+              
+              {!stats.sessionLimits.unlimited && (
+                <View style={styles.progressContainer}>
+                  <View style={styles.progressBar}>
+                    <View 
+                      style={[
+                        styles.progressFill, 
+                        { width: `${Math.min(100, (stats.monthlyUsed / stats.sessionLimits.limit) * 100)}%` }
+                      ]} 
+                    />
+                  </View>
+                  <Text style={styles.progressText}>
+                    {stats.monthlyUsed} of {stats.sessionLimits.limit} sessions used
+                  </Text>
+                </View>
+              )}
+              
+              <Text style={styles.subscriptionDesc}>
+                {stats.sessionLimits.unlimited 
+                  ? 'Enjoy unlimited personalized coaching sessions with Luna throughout your yearly subscription!'
+                  : `You have ${Math.max(0, stats.sessionLimits.limit - stats.monthlyUsed)} coaching sessions remaining this month. Sessions reset monthly.`
+                }
+              </Text>
+            </LinearGradient>
+          </View>
+        )}
+
         {/* Stats Cards */}
         {sessions.length > 0 && (
           <View style={styles.statsContainer}>
@@ -250,7 +355,7 @@ export default function CoachHistoryScreen() {
               <Card variant="elevated" style={styles.statCard}>
                 <Award size={20} color="#ff9d00" />
                 <Text style={styles.statNumber}>{stats.totalSessions}</Text>
-                <Text style={styles.statLabel}>Sessions</Text>
+                <Text style={styles.statLabel}>Total Sessions</Text>
               </Card>
               
               <Card variant="elevated" style={styles.statCard}>
@@ -324,7 +429,7 @@ export default function CoachHistoryScreen() {
             <Text style={styles.emptyStateIcon}>🎯</Text>
             <Text style={styles.emptyStateTitle}>No Coaching Sessions Yet</Text>
             <Text style={styles.emptyStateText}>
-              Start your first live coaching session with James to help you and your furry friend succeed together!
+              Start your first live coaching session with Luna to help you and your furry friend succeed together!
             </Text>
             <TouchableOpacity 
               style={styles.startButton}
@@ -355,7 +460,7 @@ export default function CoachHistoryScreen() {
             <Text style={styles.tipsTitle}>💡 Coaching Tips</Text>
             <Text style={styles.tipsText}>
               • Review your session summaries regularly to track progress{'\n'}
-              • Practice the techniques James recommends between sessions{'\n'}
+              • Practice the techniques Luna recommends between sessions{'\n'}
               • Book follow-up sessions to build on previous learnings{'\n'}
               • Share your successes with the VetPaw community
             </Text>
@@ -497,6 +602,81 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.heading.semiBold,
     color: '#544c3a',
     marginBottom: 16,
+  },
+  subscriptionCardContainer: {
+    marginBottom: 20,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  subscriptionCard: {
+    padding: 20,
+    borderRadius: 16,
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  planBadge: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+  },
+  planBadgeText: {
+    fontSize: 12,
+    fontFamily: Fonts.body.bold,
+    color: '#ffffff',
+  },
+  unlimitedText: {
+    fontSize: 14,
+    fontFamily: Fonts.body.bold,
+    color: '#ffffff',
+  },
+  sessionCount: {
+    fontSize: 14,
+    fontFamily: Fonts.body.semiBold,
+    color: '#ffffff',
+  },
+  subscriptionTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.heading.bold,
+    color: '#ffffff',
+    marginBottom: 12,
+  },
+  progressContainer: {
+    marginBottom: 12,
+  },
+  progressBar: {
+    height: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: '#ffffff',
+    borderRadius: 6,
+    minWidth: 2, // Ensure some visibility even at 0%
+  },
+  progressText: {
+    fontSize: 12,
+    fontFamily: Fonts.body.medium,
+    color: 'rgba(255, 255, 255, 0.9)',
+    textAlign: 'center',
+  },
+  subscriptionDesc: {
+    fontSize: 14,
+    fontFamily: Fonts.body.regular,
+    color: 'rgba(255, 255, 255, 0.9)',
+    lineHeight: 20,
   },
   emptyState: {
     alignItems: 'center',

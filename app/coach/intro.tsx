@@ -87,7 +87,7 @@ export default function CoachIntroScreen() {
       if (hasAnyPermission) {
         Alert.alert(
           'Success!', 
-          'Great! You can now start your coaching session with James.',
+          'Great! You can now start your coaching session with Luna.',
           [{ text: 'OK' }]
         );
       } else {
@@ -126,31 +126,55 @@ export default function CoachIntroScreen() {
         petBreed: selectedPet.breed || '',
         petAge: selectedPet.age || '',
         petWeight: selectedPet.weight || '',
-        concern: params.concern || 'general training',
+        concern: params.concern || 'general consultation',
+        topicId: params.topicId || '',
+        topicContext: params.topicContext || '',
       }
     });
     
     setIsLoading(false);
   };
 
-  const formatAge = (birthDate: string) => {
-    if (!birthDate) return 'Unknown';
-    const birth = new Date(birthDate);
-    const now = new Date();
-    const ageInMonths = (now.getFullYear() - birth.getFullYear()) * 12 + (now.getMonth() - birth.getMonth());
+  const formatAge = (age: any) => {
+    if (!age) return 'Unknown age';
     
-    if (ageInMonths < 12) {
-      return `${ageInMonths} months`;
+    // If age is already a number (years)
+    if (typeof age === 'number') {
+      return age === 1 ? '1 year' : `${age} years`;
     }
     
-    const years = Math.floor(ageInMonths / 12);
-    const months = ageInMonths % 12;
-    
-    if (months === 0) {
-      return `${years} year${years > 1 ? 's' : ''}`;
+    // If age is a string that represents years
+    if (typeof age === 'string' && !isNaN(Number(age))) {
+      const ageNum = Number(age);
+      return ageNum === 1 ? '1 year' : `${ageNum} years`;
     }
     
-    return `${years}y ${months}m`;
+    // If it might be a birth date string, try to parse it
+    try {
+      const birth = new Date(age);
+      if (!isNaN(birth.getTime())) {
+        const now = new Date();
+        const ageInMonths = (now.getFullYear() - birth.getFullYear()) * 12 + (now.getMonth() - birth.getMonth());
+        
+        if (ageInMonths < 12) {
+          return `${ageInMonths} months`;
+        }
+        
+        const years = Math.floor(ageInMonths / 12);
+        const months = ageInMonths % 12;
+        
+        if (months === 0) {
+          return `${years} year${years > 1 ? 's' : ''}`;
+        }
+        
+        return `${years}y ${months}m`;
+      }
+    } catch (error) {
+      // Fall back to showing the age as-is
+      return String(age);
+    }
+    
+    return String(age);
   };
 
   if (!selectedPet) {
@@ -177,7 +201,7 @@ export default function CoachIntroScreen() {
         >
           <ArrowLeft size={24} color="#544c3a" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Meet James</Text>
+        <Text style={styles.headerTitle}>Meet Luna</Text>
         <View style={styles.headerRight} />
       </View>
 
@@ -186,12 +210,12 @@ export default function CoachIntroScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* James Introduction */}
+        {/* Luna Introduction */}
         <Card variant="elevated" style={styles.jamesCard}>
           <View style={styles.jamesHeader}>
             <View style={styles.jamesAvatar}>
               <Image 
-                source={require('@/assets/images/behaviour coach.png')}
+                source={require('@/assets/images/luna ai dog mentor.png')}
                 style={styles.jamesImage}
                 resizeMode="cover"
               />
@@ -201,8 +225,8 @@ export default function CoachIntroScreen() {
               </View>
             </View>
             <View style={styles.jamesInfo}>
-              <Text style={styles.jamesName}>James 🐾</Text>
-              <Text style={styles.jamesTitle}>AI Dog Behavior Specialist</Text>
+              <Text style={styles.jamesName}>Luna 👩‍⚕️</Text>
+              <Text style={styles.jamesTitle}>AI Dog Mentor Vet & Behavior Specialist</Text>
               <View style={styles.jamesRating}>
                 {[1, 2, 3, 4, 5].map((star) => (
                   <Star key={star} size={14} color="#ff9d00" fill="#ff9d00" />
@@ -213,23 +237,21 @@ export default function CoachIntroScreen() {
           </View>
           
           <Text style={styles.jamesDescription}>
-            Hi! I'm James, your certified canine behavior specialist. I'm here to provide personalized, 
-            real-time coaching to help you and your furry friend succeed together. Let's have a productive 
-            2-3 minute session! 🎯
+          Hi! I'm Luna – your expert AI dog mentor. I help with behavior, health, feeding, and daily routines. Let's make the next 2–3 minutes count! 🐾🎯
           </Text>
           
           <View style={styles.jamesFeatures}>
             <View style={styles.feature}>
               <Zap size={16} color="#ff9d00" />
-              <Text style={styles.featureText}>Real-time guidance</Text>
+              <Text style={styles.featureText}>Live Mentorship</Text>
             </View>
             <View style={styles.feature}>
               <Heart size={16} color="#ff9d00" />
-              <Text style={styles.featureText}>Positive reinforcement</Text>
+              <Text style={styles.featureText}>Positive       Vibe</Text>
             </View>
             <View style={styles.feature}>
               <Shield size={16} color="#ff9d00" />
-              <Text style={styles.featureText}>Science-based methods</Text>
+              <Text style={styles.featureText}>Expert       Advice</Text>
             </View>
           </View>
         </Card>
@@ -240,9 +262,9 @@ export default function CoachIntroScreen() {
           
           <View style={styles.petInfo}>
             <View style={styles.petAvatarContainer}>
-              {selectedPet.image_url ? (
+              {selectedPet.avatar_url ? (
                 <Image 
-                  source={{ uri: selectedPet.image_url }}
+                  source={{ uri: selectedPet.avatar_url }}
                   style={styles.petAvatar}
                   resizeMode="cover"
                 />
@@ -256,7 +278,7 @@ export default function CoachIntroScreen() {
             <View style={styles.petDetails}>
               <Text style={styles.petName}>{selectedPet.name}</Text>
               <Text style={styles.petBreed}>
-                {selectedPet.breed || 'Mixed Breed'} • {formatAge(selectedPet.birth_date)}
+                {selectedPet.breed || 'Mixed Breed'} • {formatAge(selectedPet.age)}
               </Text>
               {selectedPet.weight && (
                 <Text style={styles.petWeight}>{selectedPet.weight} lbs</Text>
@@ -279,7 +301,7 @@ export default function CoachIntroScreen() {
             </View>
             <View style={styles.sessionDetail}>
               <Video size={20} color="#ff9d00" />
-              <Text style={styles.sessionDetailText}>Live video coaching with James</Text>
+              <Text style={styles.sessionDetailText}>Live video coaching with Luna</Text>
             </View>
             <View style={styles.sessionDetail}>
               <User size={20} color="#ff9d00" />
@@ -300,7 +322,7 @@ export default function CoachIntroScreen() {
             </View>
             
             <Text style={styles.permissionDescription}>
-              To provide the best coaching experience, James needs access to your camera and microphone. 
+              To provide the best coaching experience, Luna needs access to your camera and microphone. 
               This allows for real-time interaction and personalized guidance.
             </Text>
 
@@ -327,13 +349,8 @@ export default function CoachIntroScreen() {
 
         {/* Start Session Button */}
         <View style={styles.buttonContainer}>
-          {/* Debug Info */}
-          <Text style={{ fontSize: 12, color: '#666', marginBottom: 10, textAlign: 'center' }}>
-            Debug: hasPermissions={hasPermissions.toString()}, isChecking={isCheckingPermissions.toString()}, isLoading={isLoading.toString()}
-          </Text>
-          
           <Button
-            title="Start Live Session with James"
+            title="Start Live Session with Luna"
             onPress={handleStartSession}
             style={styles.startButton}
             disabled={isLoading || !hasPermissions}
@@ -342,7 +359,7 @@ export default function CoachIntroScreen() {
           
           <Text style={styles.disclaimerText}>
             {hasPermissions 
-              ? `💡 Ready to start! James will provide real-time guidance for ${selectedPet.name}.`
+              ? `💡 Ready to start! Luna will provide real-time guidance for ${selectedPet.name}.`
               : '🔒 Please allow camera or microphone access to start your session.'
             }
           </Text>
@@ -642,3 +659,4 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 });
+

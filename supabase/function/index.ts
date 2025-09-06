@@ -33,123 +33,275 @@ serve(async (req) => {
   }
 
   try {
-    // Initialize Supabase client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    const supabase = createClient(supabaseUrl, supabaseServiceKey)
-
-    // Get environment variables
-    const tavusApiKey = Deno.env.get('TAVUS_API_KEY')!
-    const geminiApiKey = Deno.env.get('GEMINI_API_KEY')!
-    const expoAccessToken = Deno.env.get('EXPO_ACCESS_TOKEN')
-
-    // Parse webhook payload
-    const payload: TavusWebhookPayload = await req.json()
+    console.log('🎯 Tavus webhook received:', req.method);
     
-    console.log('🔔 Tavus webhook received:', payload.event_type, payload.session_id)
-
-    // Only handle transcription_ready events
-    if (payload.event_type !== 'application.transcription_ready') {
-      console.log('⏭️ Ignoring event type:', payload.event_type)
-      return new Response(JSON.stringify({ message: 'Event ignored' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 200,
-      })
+    // Parse the webhook payload from Tavus
+    const body = await req.json();
+    console.log('📄 Webhook payload:', JSON.stringify(body, null, 2));
+    
+    const conversationId = body?.conversation_id;
+    const eventType = body?.event_type;
+    
+    if (!conversationId) {
+      console.error('❌ No conversation ID in webhook');
+      return new Response('No conversation ID', { 
+        status: 400, 
+        headers: corsHeaders 
+      });
     }
 
-    // Find the coaching session in our database
-    const { data: session, error: sessionError } = await supabase
-      .from('coaching_sessions')
-      .select('*')
-      .eq('tavus_session_id', payload.session_id)
-      .single()
-
-    if (sessionError || !session) {
-      console.error('❌ Session not found:', payload.session_id, sessionError)
-      return new Response(JSON.stringify({ error: 'Session not found' }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        status: 404,
-      })
+    // Only process conversation completion events
+    if (eventType !== 'conversation_completed' && eventType !== 'conversation.ended') {
+      console.log(`⏭️ Ignoring event type: ${eventType}`);
+      return new Response('Event ignored', { 
+        status: 200, 
+        headers: corsHeaders 
+      });
     }
 
-    console.log('📝 Processing session:', session.id)
+    console.log(`🎬 Processing conversation completion for: ${conversationId}`);
 
-    // Fetch final transcript from Tavus
-    const transcript = await fetchTavusTranscript(payload.session_id, tavusApiKey)
-    if (!transcript) {
-      throw new Error('Failed to fetch transcript from Tavus')
+    // Initialize Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Wait a bit for Tavus to process the conversation fully
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // 🎯 Step 1: Fetch conversation details and transcript from Tavus
+    console.log('📝 Fetching conversation transcript from Tavus...');
+    
+    const tavusApiKey = Deno.env.get('TAVUS_API_KEY');
+    if (!tavusApiKey) {
+      throw new Error('TAVUS_API_KEY not configured');
     }
 
-    // Generate summary using Gemini
-    const summary = await generateSummaryWithGemini(transcript, geminiApiKey)
-    if (!summary) {
-      throw new Error('Failed to generate summary with Gemini')
-    }
-
-    // Store summary in database
-    const { error: summaryError } = await supabase
-      .from('session_summaries')
-      .insert({
-        session_id: session.id,
-        urgency_level: summary.urgency_level,
-        primary_issue: summary.main_topic,
-        recommendations: summary.recommendations,
-        follow_up_steps: summary.next_steps,
-        analysis_data: {
-          session_title: summary.session_title,
-          key_points: summary.key_points,
-          techniques_taught: summary.techniques_taught,
-          progress_notes: summary.progress_notes,
-          follow_up_timeline: summary.follow_up_timeline,
-          transcript: transcript,
-          processed_at: new Date().toISOString(),
+    const conversationResponse = await fetch(
+      `https://tavusapi.com/v2/conversations/${conversationId}?include_captions=1`,
+      {
+        method: 'GET',
+        headers: {
+          'x-api-key': tavusApiKey,
+          'Content-Type': 'application/json',
         }
-      })
-
-    if (summaryError) {
-      console.error('❌ Failed to store summary:', summaryError)
-      throw summaryError
-    }
-
-    console.log('✅ Summary stored successfully')
-
-    // Send push notification if Expo token is available
-    if (expoAccessToken) {
-      try {
-        await sendPushNotification(session.user_id, summary, expoAccessToken, supabase)
-      } catch (error) {
-        console.error('⚠️ Failed to send push notification:', error)
-        // Don't fail the entire request if notification fails
       }
+    );
+
+    if (!conversationResponse.ok) {
+      console.error(`❌ Failed to fetch conversation: ${conversationResponse.status}`);
+      throw new Error(`Tavus API error: ${conversationResponse.status}`);
     }
 
-    // Update session status
-    await supabase
-      .from('coaching_sessions')
-      .update({ 
-        status: 'completed',
-        ended_at: new Date().toISOString()
+    const conversationData = await conversationResponse.json();
+    console.log('✅ Conversation data retrieved');
+    
+    const captions = conversationData?.captions || [];
+    const metadata = conversationData?.metadata || {};
+    
+    // Build full transcript
+    const fullTranscript = captions
+      .filter((caption: any) => caption.text && caption.text.trim())
+      .map((caption: any) => {
+        const speaker = caption.speaker === 'participant' ? 'USER' : 'JAMES';
+        return `${speaker}: ${caption.text}`;
       })
-      .eq('id', session.id)
+      .join('\n');
 
-    return new Response(JSON.stringify({ 
-      message: 'Webhook processed successfully',
-      session_id: session.id,
-      summary_generated: true
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    })
+    console.log(`📄 Transcript length: ${fullTranscript.length} characters`);
+
+    if (!fullTranscript || fullTranscript.length < 50) {
+      console.warn('⚠️ Transcript is too short, saving minimal data');
+      // Save minimal session data
+      const { error: saveError } = await supabase
+        .from('ai_coaching_sessions')
+        .insert({
+          conversation_id: conversationId,
+          transcript: fullTranscript || 'No transcript available',
+          summary: 'Session was too short to generate a meaningful summary.',
+          session_title: 'Brief Coaching Session',
+          main_topic: 'Quick conversation',
+          key_points: ['Session completed'],
+          recommendations: ['Continue practicing'],
+          status: 'completed',
+          duration_seconds: 0,
+          created_at: new Date().toISOString(),
+        });
+
+      if (saveError) {
+        console.error('❌ Error saving minimal session:', saveError);
+        throw saveError;
+      }
+
+      return new Response('Minimal session saved ✅', { 
+        status: 200, 
+        headers: corsHeaders 
+      });
+    }
+
+    // 🎯 Step 2: Generate summary using Gemini
+    console.log('🤖 Generating session summary with Gemini...');
+    
+    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
+    if (!geminiApiKey) {
+      throw new Error('GEMINI_API_KEY not configured');
+    }
+
+    const summaryPrompt = `Analyze this dog coaching session transcript and provide a comprehensive summary in JSON format.
+
+TRANSCRIPT:
+${fullTranscript}
+
+Please respond with ONLY a valid JSON object containing:
+{
+  "session_title": "Brief descriptive title",
+  "main_topic": "Primary issue discussed",
+  "urgency_level": "low|moderate|high", 
+  "key_points": ["Important points discussed"],
+  "recommendations": ["Specific action items"],
+  "techniques_taught": ["Training methods covered"],
+  "next_steps": ["Follow-up actions"],
+  "progress_notes": "Overall assessment",
+  "follow_up_timeline": "When to check progress"
+}`;
+
+    const geminiResponse = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{ text: summaryPrompt }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            maxOutputTokens: 1024,
+          },
+        }),
+      }
+    );
+
+    if (!geminiResponse.ok) {
+      console.error(`❌ Gemini API error: ${geminiResponse.status}`);
+      throw new Error(`Gemini API error: ${geminiResponse.status}`);
+    }
+
+    const geminiData = await geminiResponse.json();
+    const summaryText = geminiData?.candidates?.[0]?.content?.parts?.[0]?.text;
+    
+    if (!summaryText) {
+      throw new Error('No summary generated by Gemini');
+    }
+
+    // Extract JSON from Gemini response
+    let summary;
+    try {
+      const jsonMatch = summaryText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        summary = JSON.parse(jsonMatch[0]);
+        console.log('✅ Summary generated successfully');
+      } else {
+        throw new Error('No JSON found in Gemini response');
+      }
+    } catch (parseError) {
+      console.warn('⚠️ Failed to parse Gemini JSON, using fallback summary');
+      summary = {
+        session_title: 'Coaching Session Summary',
+        main_topic: 'Dog Training Discussion',
+        urgency_level: 'low',
+        key_points: ['Session completed successfully'],
+        recommendations: ['Continue practicing the discussed techniques'],
+        techniques_taught: ['Various training methods'],
+        next_steps: ['Practice regularly', 'Monitor progress'],
+        progress_notes: 'Session completed. Further analysis needed.',
+        follow_up_timeline: 'Check progress in 1 week'
+      };
+    }
+
+    // Calculate session duration
+    const durationSeconds = captions.length > 0 ? 
+      Math.floor((new Date(captions[captions.length - 1]?.timestamp || new Date()).getTime() - 
+                  new Date(captions[0]?.timestamp || new Date()).getTime()) / 1000) : 0;
+
+    // 🎯 Step 3: Save complete session data to Supabase
+    console.log('💾 Saving session data to Supabase...');
+
+    const sessionData = {
+      conversation_id: conversationId,
+      transcript: fullTranscript,
+      summary: summaryText,
+      session_title: summary.session_title || 'Coaching Session',
+      main_topic: summary.main_topic || 'Dog Training',
+      urgency_level: summary.urgency_level || 'low',
+      key_points: summary.key_points || [],
+      recommendations: summary.recommendations || [],
+      techniques_taught: summary.techniques_taught || [],
+      next_steps: summary.next_steps || [],
+      progress_notes: summary.progress_notes || '',
+      follow_up_timeline: summary.follow_up_timeline || '',
+      status: 'completed',
+      duration_seconds: durationSeconds,
+      created_at: new Date().toISOString(),
+      // Store raw data for debugging
+      raw_conversation_data: conversationData,
+      raw_captions: captions,
+    };
+
+    const { data: sessionRecord, error: saveError } = await supabase
+      .from('ai_coaching_sessions')
+      .insert(sessionData)
+      .select()
+      .single();
+
+    if (saveError) {
+      console.error('❌ Error saving session to Supabase:', saveError);
+      throw saveError;
+    }
+
+    console.log('✅ Session saved successfully:', sessionRecord.id);
+
+    // 🎯 Step 4: Optional - Send notification or trigger other workflows
+    // You could add email notifications, push notifications, etc. here
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: 'Session processed successfully',
+        session_id: sessionRecord.id,
+        conversation_id: conversationId,
+        summary_generated: true,
+        transcript_length: fullTranscript.length,
+        duration_seconds: durationSeconds,
+      }),
+      {
+        status: 200,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
   } catch (error) {
-    console.error('💥 Webhook processing error:', error)
-    return new Response(JSON.stringify({ 
-      error: 'Internal server error',
-      details: error.message 
-    }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 500,
-    })
+    console.error('💥 Webhook processing error:', error);
+    
+    return new Response(
+      JSON.stringify({
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      }),
+      {
+        status: 500,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
   }
 })
 

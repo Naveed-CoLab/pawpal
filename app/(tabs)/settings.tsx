@@ -17,7 +17,8 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
-import { Settings as SettingsIcon, Bell, Shield, CreditCard, CircleHelp as HelpCircle, Star, ChevronRight, Volume2, Moon, Globe, LogOut, Crown } from 'lucide-react-native';
+import { Settings as SettingsIcon, Bell, Shield, CreditCard, CircleHelp as HelpCircle, Star, ChevronRight, Volume2, Moon, Globe, LogOut, Crown, Cog } from 'lucide-react-native';
+import { ConfigurationManager } from '@/components/ui/ConfigurationManager';
 
 interface SettingItem {
   id: string;
@@ -32,11 +33,12 @@ interface SettingItem {
 
 export default function SettingsScreen() {
   const { user, signOut, isLoading } = useAuth();
-  const { isSubscribed, loading: subscriptionLoading, presentPaywall } = useRevenueCat();
+  const { isSubscribed, loading: subscriptionLoading, presentPaywallIfNeeded } = useRevenueCat();
   const [notifications, setNotifications] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
+  const [showConfigManager, setShowConfigManager] = useState(false);
 
   // Debug auth state
   useEffect(() => {
@@ -49,14 +51,20 @@ export default function SettingsScreen() {
   }, [user, isLoading, signingOut]);
 
   const handleUpgrade = async () => {
-    // Use RevenueCat dashboard paywall
-    const result = await presentPaywall();
+    // Use RevenueCat dashboard paywall with improved error handling
+    const result = await presentPaywallIfNeeded('premium');
     
     if (result.success) {
       Alert.alert(
         'Welcome to Premium! 🎉',
         'You now have access to all premium features!',
         [{ text: 'Awesome!' }]
+      );
+    } else if (result.error && !result.error.includes('cancelled')) {
+      Alert.alert(
+        'Error',
+        result.error || 'Failed to show premium options. Please try again.',
+        [{ text: 'OK' }]
       );
     }
   };
@@ -75,8 +83,8 @@ export default function SettingsScreen() {
 
   const handleRateApp = () => {
     Alert.alert(
-      'Rate VetPaw',
-      'Love using VetPaw? Please rate us on the App Store!',
+      'Rate PawPal',
+      'Love using PawPal? Please rate us on the App Store!',
       [
         { text: 'Maybe Later', style: 'cancel' },
         { text: 'Rate Now', onPress: () => {} },
@@ -179,11 +187,19 @@ export default function SettingsScreen() {
         },
         {
           id: 'rate',
-          title: 'Rate VetPaw',
+          title: 'Rate PawPal',
           subtitle: 'Share your feedback with us',
           icon: <Star size={20} color={Colors.primary} />,
           type: 'action' as const,
           onPress: handleRateApp,
+        },
+        {
+          id: 'config',
+          title: 'API Configuration',
+          subtitle: 'Manage app configuration settings',
+          icon: <Cog size={20} color={Colors.primary} />,
+          type: 'action' as const,
+          onPress: () => setShowConfigManager(true),
         },
         {
           id: 'signout',
@@ -205,12 +221,8 @@ export default function SettingsScreen() {
         (isLoading || signingOut) && styles.settingItemDisabled
       ]}
       onPress={() => {
-        console.log('Settings: TouchableOpacity pressed for item:', item.id, { disabled: item.type === 'toggle' || isLoading || signingOut });
         if (item.onPress) {
-          console.log('Settings: Calling item.onPress for:', item.id);
           item.onPress();
-        } else {
-          console.log('Settings: No onPress function for item:', item.id);
         }
       }}
       disabled={item.type === 'toggle' || isLoading || signingOut}
@@ -259,7 +271,7 @@ export default function SettingsScreen() {
           <Text style={styles.headerTitle}>Settings</Text>
           {user && (
             <Text style={styles.userInfo}>
-              Signed in as {user.full_name || user.email}
+              Signed in as {user.full_name || user.email || 'User'}
             </Text>
           )}
         </View>
@@ -306,12 +318,18 @@ export default function SettingsScreen() {
 
         {/* App Info */}
         <View style={styles.appInfo}>
-          <Text style={styles.appVersion}>VetPaw v1.0.0</Text>
+          <Text style={styles.appVersion}>PawPal v1.0.0</Text>
           <Text style={styles.appCopyright}>
-            © 2024 VetPaw. Made with ❤️ for pet parents.
+            © 2024 PawPal. Made with ❤️ for pet parents.
           </Text>
         </View>
       </ScrollView>
+
+      {/* Configuration Manager */}
+      <ConfigurationManager
+        visible={showConfigManager}
+        onClose={() => setShowConfigManager(false)}
+      />
     </LinearGradient>
   );
 }

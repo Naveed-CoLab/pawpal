@@ -1,201 +1,318 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Modal,
-  TouchableOpacity,
-  Switch,
   ScrollView,
+  TouchableOpacity,
+  Dimensions,
+  Image,
   Alert,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
-import { X, Bell, Heart, Stethoscope, MessageSquare, Crown } from 'lucide-react-native';
+import { Notification, NotificationService } from '@/lib/notificationService';
+import { useNotifications } from '@/hooks/useNotifications';
+import { 
+  X, 
+  Bell, 
+  Trophy, 
+  TrendingUp, 
+  AlertTriangle, 
+  Camera, 
+  Video, 
+  Heart, 
+  Star,
+  Trash2,
+  CheckCheck,
+  MoreVertical
+} from 'lucide-react-native';
 
 interface NotificationModalProps {
   visible: boolean;
   onClose: () => void;
 }
 
-interface NotificationSettings {
-  pushNotifications: boolean;
-  moodReminders: boolean;
-  healthAlerts: boolean;
-  coachingUpdates: boolean;
-  premiumOffers: boolean;
-  emailUpdates: boolean;
-}
-
-const defaultSettings: NotificationSettings = {
-  pushNotifications: true,
-  moodReminders: true,
-  healthAlerts: true,
-  coachingUpdates: true,
-  premiumOffers: true,
-  emailUpdates: false,
-};
+const { width, height } = Dimensions.get('window');
 
 export function NotificationModal({ visible, onClose }: NotificationModalProps) {
-  const [settings, setSettings] = useState<NotificationSettings>(defaultSettings);
-  const [loading, setLoading] = useState(false);
+  const { 
+    notifications, 
+    unreadCount, 
+    markAsRead, 
+    markAllAsRead, 
+    deleteNotification,
+    fetchNotifications 
+  } = useNotifications();
+  
+  const [expandedNotifications, setExpandedNotifications] = useState<Set<string>>(new Set());
 
-  // Load settings on component mount
-  useEffect(() => {
-    loadSettings();
-  }, []);
+  const handleNotificationPress = async (notification: Notification) => {
+    // Mark as read if unread
+    if (!notification.is_read) {
+      await markAsRead(notification.id);
+    }
 
-  const loadSettings = async () => {
-    try {
-      const savedSettings = await AsyncStorage.getItem('notificationSettings');
-      if (savedSettings) {
-        setSettings(JSON.parse(savedSettings));
+    // Handle action
+    if (notification.action_type === 'navigate' && notification.action_data) {
+      onClose();
+      router.push(notification.action_data as any);
+    } else if (notification.action_type === 'modal') {
+      // Handle modal actions (can be expanded later)
+      Alert.alert('Achievement!', notification.message);
+    }
+  };
+
+  const handleDeleteNotification = (notificationId: string) => {
+    Alert.alert(
+      'Delete Notification',
+      'Are you sure you want to delete this notification?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Delete', 
+          style: 'destructive',
+          onPress: () => deleteNotification(notificationId)
+        },
+      ]
+    );
+  };
+
+  const handleMarkAllRead = () => {
+    if (unreadCount > 0) {
+      Alert.alert(
+        'Mark All as Read',
+        `Mark all ${unreadCount} notifications as read?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { 
+            text: 'Mark All Read', 
+            onPress: () => markAllAsRead()
+          },
+        ]
+      );
+    }
+  };
+
+  const toggleExpanded = (notificationId: string) => {
+    setExpandedNotifications(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(notificationId)) {
+        newSet.delete(notificationId);
+      } else {
+        newSet.add(notificationId);
       }
-    } catch (error) {
-      console.error('Failed to load notification settings:', error);
+      return newSet;
+    });
+  };
+
+  const getNotificationIcon = (type: Notification['type']) => {
+    const iconProps = { size: 24, color: '#47463e' };
+    
+    switch (type) {
+      case 'badge_awarded':
+        return <Trophy {...iconProps} color="#ff9d00" />;
+      case 'behavior_trend':
+        return <TrendingUp {...iconProps} color="#4CAF50" />;
+      case 'health_alert':
+        return <AlertTriangle {...iconProps} color="#ff6b6b" />;
+      case 'mood_reminder':
+        return <Camera {...iconProps} color="#2196F3" />;
+      case 'coaching_available':
+        return <Video {...iconProps} color="#9C27B0" />;
+      case 'welcome':
+        return <Heart {...iconProps} color="#E91E63" />;
+      case 'achievement':
+        return <Star {...iconProps} color="#ff9d00" />;
+      default:
+        return <Bell {...iconProps} />;
     }
   };
 
-  const saveSettings = async (newSettings: NotificationSettings) => {
-    try {
-      setLoading(true);
-      await AsyncStorage.setItem('notificationSettings', JSON.stringify(newSettings));
-      setSettings(newSettings);
-      
-      // In a real app, you'd also sync with your backend here
-      console.log('📱 Notification settings saved:', newSettings);
-    } catch (error) {
-      console.error('Failed to save notification settings:', error);
-      Alert.alert('Error', 'Failed to save notification settings. Please try again.');
-    } finally {
-      setLoading(false);
-    }
+  const formatTimeAgo = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffInSeconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+    if (diffInSeconds < 60) return 'Just now';
+    if (diffInSeconds < 3600) return `${Math.floor(diffInSeconds / 60)}m ago`;
+    if (diffInSeconds < 86400) return `${Math.floor(diffInSeconds / 3600)}h ago`;
+    if (diffInSeconds < 604800) return `${Math.floor(diffInSeconds / 86400)}d ago`;
+    return date.toLocaleDateString();
   };
 
-  const toggleSetting = (key: keyof NotificationSettings) => {
-    const newSettings = { ...settings, [key]: !settings[key] };
-    saveSettings(newSettings);
-  };
+  const renderNotificationItem = (notification: Notification) => {
+    const isExpanded = expandedNotifications.has(notification.id);
+    const isUnread = !notification.is_read;
 
-  const notificationOptions = [
-    {
-      key: 'pushNotifications' as keyof NotificationSettings,
-      title: 'Push Notifications',
-      description: 'Receive notifications on your device',
-      icon: <Bell size={20} color="#ff9d00" />,
-      important: true,
-    },
-    {
-      key: 'moodReminders' as keyof NotificationSettings,
-      title: 'Mood Check Reminders',
-      description: 'Daily reminders to check your pet\'s mood',
-      icon: <Heart size={20} color="#ff6b6b" />,
-    },
-    {
-      key: 'healthAlerts' as keyof NotificationSettings,
-      title: 'Health Alerts',
-      description: 'Important health-related notifications',
-      icon: <Stethoscope size={20} color="#4ecdc4" />,
-    },
-    {
-      key: 'coachingUpdates' as keyof NotificationSettings,
-      title: 'Coaching Updates',
-      description: 'New coaching sessions and tips',
-      icon: <MessageSquare size={20} color="#45b7d1" />,
-    },
-    {
-      key: 'premiumOffers' as keyof NotificationSettings,
-      title: 'Premium Offers',
-      description: 'Special promotions and premium features',
-      icon: <Crown size={20} color="#ffd93d" />,
-    },
-    {
-      key: 'emailUpdates' as keyof NotificationSettings,
-      title: 'Email Updates',
-      description: 'Weekly newsletter and important updates',
-      icon: <Bell size={20} color="#95a5a6" />,
-    },
-  ];
+    return (
+      <TouchableOpacity
+        key={notification.id}
+        style={[
+          styles.notificationItem,
+          isUnread && styles.unreadNotification
+        ]}
+        onPress={() => handleNotificationPress(notification)}
+        activeOpacity={0.8}
+      >
+        <View
+          style={[
+            styles.notificationContainer,
+            { backgroundColor: isUnread ? '#fff8e1' : '#f8f8f8' }
+          ]}
+        >
+          <View style={styles.notificationContent}>
+            {/* Icon and Priority Indicator */}
+            <View style={styles.iconSection}>
+              <View style={[
+                styles.iconContainer,
+                { borderColor: NotificationService.getPriorityColor(notification.priority) }
+              ]}>
+                {getNotificationIcon(notification.type)}
+              </View>
+              {isUnread && <View style={styles.unreadDot} />}
+            </View>
+
+            {/* Content Section */}
+            <View style={styles.contentSection}>
+              <View style={styles.headerRow}>
+                <Text style={[styles.title, isUnread && styles.unreadTitle]}>
+                  {notification.title}
+                </Text>
+                <View style={styles.actionButtons}>
+                  <TouchableOpacity
+                    onPress={() => toggleExpanded(notification.id)}
+                    style={styles.actionButton}
+                  >
+                    <MoreVertical size={16} color="#47463e" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <Text 
+                style={styles.message}
+                numberOfLines={isExpanded ? undefined : 2}
+              >
+                {notification.message}
+              </Text>
+
+              <View style={styles.metaRow}>
+                <Text style={styles.timeStamp}>
+                  {formatTimeAgo(notification.created_at)}
+                </Text>
+                <View style={[
+                  styles.priorityBadge,
+                  { backgroundColor: NotificationService.getPriorityColor(notification.priority) }
+                ]}>
+                  <Text style={styles.priorityText}>
+                    {notification.priority.toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Expanded Actions */}
+              {isExpanded && (
+                <View style={styles.expandedActions}>
+                  {isUnread && (
+                    <TouchableOpacity
+                      onPress={() => markAsRead(notification.id)}
+                      style={[styles.expandedActionButton, styles.markReadButton]}
+                    >
+                      <CheckCheck size={16} color="#4CAF50" />
+                      <Text style={styles.markReadButtonText}>Mark as Read</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => handleDeleteNotification(notification.id)}
+                    style={[styles.expandedActionButton, styles.deleteButton]}
+                  >
+                    <Trash2 size={16} color="#ff6b6b" />
+                    <Text style={styles.deleteButtonText}>Delete</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+    <Modal
+      visible={visible}
+      animationType="slide"
+      presentationStyle="pageSheet"
+      onRequestClose={onClose}
+    >
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.headerLeft}>
-            <Bell size={24} color="#ff9d00" />
-            <Text style={styles.headerTitle}>Notification Preferences</Text>
-          </View>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <X size={24} color="#544c3a" />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Description */}
-          <View style={styles.descriptionContainer}>
-            <Text style={styles.description}>
-              Customize which notifications you'd like to receive to stay updated on your pet's health and well-being.
-            </Text>
-          </View>
-
-          {/* Notification Options */}
-          <View style={styles.optionsContainer}>
-            {notificationOptions.map((option) => (
-              <View key={option.key} style={styles.optionItem}>
-                <View style={styles.optionLeft}>
-                  <View style={styles.iconContainer}>
-                    {option.icon}
-                  </View>
-                  <View style={styles.optionContent}>
-                    <Text style={styles.optionTitle}>{option.title}</Text>
-                    <Text style={styles.optionDescription}>{option.description}</Text>
-                    {option.important && (
-                      <Text style={styles.importantNote}>
-                        Required for core app functionality
-                      </Text>
-                    )}
-                  </View>
+          <View style={styles.headerContent}>
+            <View style={styles.headerLeft}>
+              <Bell size={24} color="#47463e" />
+              <Text style={styles.headerTitle}>Notifications</Text>
+              {unreadCount > 0 && (
+                <View style={styles.headerBadge}>
+                  <Text style={styles.headerBadgeText}>{unreadCount}</Text>
                 </View>
-                <Switch
-                  value={settings[option.key]}
-                  onValueChange={() => toggleSetting(option.key)}
-                  trackColor={{ false: '#E5E5E5', true: '#ff9d0080' }}
-                  thumbColor={settings[option.key] ? '#ff9d00' : '#F4F3F4'}
-                  disabled={loading}
-                />
-              </View>
-            ))}
-          </View>
-
-          {/* Info Section */}
-          <View style={styles.infoContainer}>
-            <Text style={styles.infoTitle}>📱 About Notifications</Text>
-            <Text style={styles.infoText}>
-              • Push notifications require device permissions{'\n'}
-              • You can change these settings anytime{'\n'}
-              • Critical health alerts will always be delivered{'\n'}
-              • Email preferences are managed separately
-            </Text>
-          </View>
-
-          {/* Action Buttons */}
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity
-              style={styles.systemSettingsButton}
-              onPress={() => {
-                Alert.alert(
-                  'System Settings',
-                  'To manage system-level notification permissions, go to your device Settings > Apps > VetPaw > Notifications',
-                  [{ text: 'OK' }]
-                );
-              }}
-            >
-              <Text style={styles.systemSettingsText}>Open System Settings</Text>
+              )}
+            </View>
+            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+              <X size={24} color="#47463e" />
             </TouchableOpacity>
           </View>
-        </ScrollView>
+
+          {/* Action Bar */}
+          {notifications.length > 0 && (
+            <View style={styles.actionBar}>
+              <TouchableOpacity
+                onPress={handleMarkAllRead}
+                style={[
+                  styles.actionBarButton,
+                  unreadCount === 0 && styles.disabledButton
+                ]}
+                disabled={unreadCount === 0}
+              >
+                <CheckCheck size={18} color={unreadCount > 0 ? "#4CAF50" : "#a0a0a0"} />
+                <Text style={[
+                  styles.actionBarButtonText,
+                  unreadCount === 0 && styles.disabledButtonText
+                ]}>
+                  Mark All Read
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={fetchNotifications}
+                style={styles.actionBarButton}
+              >
+                <Text style={styles.actionBarButtonText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Notifications List */}
+        {notifications.length === 0 ? (
+          <View style={styles.emptyState}>
+            <Bell size={60} color="#cccccc" />
+            <Text style={styles.emptyTitle}>No Notifications</Text>
+            <Text style={styles.emptySubtitle}>
+              You're all caught up! Check back later for updates about your pets.
+            </Text>
+          </View>
+        ) : (
+          <ScrollView
+            style={styles.notificationsList}
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.notificationsContent}
+          >
+            {notifications.map(renderNotificationItem)}
+          </ScrollView>
+        )}
       </View>
     </Modal>
   );
@@ -204,144 +321,232 @@ export function NotificationModal({ visible, onClose }: NotificationModalProps) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFF8E1',
+    backgroundColor: Colors.background,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    backgroundColor: '#fff8e1',
     paddingTop: 60,
     paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5E5',
+    paddingHorizontal: 20,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 15,
   },
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: '#47463e',
+  },
+  headerBadge: {
+    backgroundColor: '#ff6b6b',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+  },
+  headerBadgeText: {
+    color: '#fff8e1',
+    fontSize: 8,
+    fontFamily: Fonts.body.bold,
+    lineHeight: 10,
   },
   closeButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: Colors.white,
+    backgroundColor: '#ffecb3',
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
+  },
+  actionBar: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  actionBarButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#ffecb3',
+    gap: 6,
+  },
+  actionBarButtonText: {
+    fontSize: 14,
+    fontFamily: Fonts.body.medium,
+    color: '#47463e',
+  },
+  disabledButton: {
+    backgroundColor: '#f0f0f0',
+  },
+  disabledButtonText: {
+    color: '#a0a0a0',
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    fontSize: 20,
+    fontFamily: Fonts.heading.bold,
+    color: '#47463e',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    fontSize: 16,
+    fontFamily: Fonts.body.regular,
+    color: '#47463e',
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  notificationsList: {
+    flex: 1,
+  },
+  notificationsContent: {
+    padding: 16,
+    paddingBottom: 100,
+  },
+  notificationItem: {
+    marginBottom: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#47463e',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
-  content: {
-    flex: 1,
-    paddingHorizontal: 20,
+  unreadNotification: {
+    shadowOpacity: 0.15,
+    elevation: 4,
   },
-  descriptionContainer: {
-    marginVertical: 20,
-  },
-  description: {
-    fontSize: 16,
-    fontFamily: Fonts.body.regular,
-    color: '#544c3a',
-    lineHeight: 22,
-    textAlign: 'center',
-  },
-  optionsContainer: {
-    gap: 16,
-  },
-  optionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: Colors.white,
+  notificationContainer: {
     padding: 16,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
-  optionLeft: {
+  notificationContent: {
     flexDirection: 'row',
+    gap: 12,
+  },
+  iconSection: {
     alignItems: 'center',
-    flex: 1,
-    marginRight: 16,
+    position: 'relative',
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#FFF8E1',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fff8e1',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    borderWidth: 2,
   },
-  optionContent: {
+  unreadDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#ff6b6b',
+    borderWidth: 2,
+    borderColor: '#fff8e1',
+  },
+  contentSection: {
     flex: 1,
   },
-  optionTitle: {
-    fontSize: 16,
-    fontFamily: Fonts.body.semiBold,
-    color: '#544c3a',
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 4,
   },
-  optionDescription: {
+  title: {
+    fontSize: 16,
+    fontFamily: Fonts.body.bold,
+    color: '#47463e',
+    flex: 1,
+  },
+  unreadTitle: {
+    color: '#47463e',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionButton: {
+    padding: 4,
+  },
+  message: {
     fontSize: 14,
     fontFamily: Fonts.body.regular,
-    color: '#666666',
-    lineHeight: 18,
-  },
-  importantNote: {
-    fontSize: 12,
-    fontFamily: Fonts.body.regular,
-    color: '#ff9d00',
-    marginTop: 2,
-  },
-  infoContainer: {
-    marginTop: 24,
-    marginBottom: 16,
-    padding: 16,
-    backgroundColor: '#E8F4FD',
-    borderRadius: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#45b7d1',
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontFamily: Fonts.body.semiBold,
-    color: '#544c3a',
+    color: '#47463e',
+    lineHeight: 20,
     marginBottom: 8,
   },
-  infoText: {
-    fontSize: 14,
+  metaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  timeStamp: {
+    fontSize: 12,
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
-    lineHeight: 20,
+    color: '#666',
   },
-  buttonContainer: {
-    marginTop: 16,
-    marginBottom: 32,
-  },
-  systemSettingsButton: {
-    backgroundColor: '#f8f9fa',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+  priorityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E5E5E5',
   },
-  systemSettingsText: {
-    fontSize: 14,
+  priorityText: {
+    fontSize: 10,
+    fontFamily: Fonts.body.bold,
+    color: '#fff8e1',
+  },
+  expandedActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  expandedActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 4,
+  },
+  markReadButton: {
+    backgroundColor: '#e8f5e8',
+  },
+  markReadButtonText: {
+    fontSize: 12,
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
-    textAlign: 'center',
+    color: '#4CAF50',
+  },
+  deleteButton: {
+    backgroundColor: '#ffebee',
+  },
+  deleteButtonText: {
+    fontSize: 12,
+    fontFamily: Fonts.body.medium,
+    color: '#ff6b6b',
   },
 }); 

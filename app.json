@@ -1,52 +1,55 @@
 {
   "expo": {
-    "name": "VetPaw - AI Dog Care",
-    "slug": "vetpaw-ai-dog-care",
+    "name": "PawPal",
+    "slug": "pawpal",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "vetpaw",
     "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/images/splash-screen.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFF8E1"
+    },
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.pawpal.pawpalapp",
       "infoPlist": {
-        "NSCameraUsageDescription": "VetPaw needs camera access to take photos of your pet for AI analysis",
-        "NSMicrophoneUsageDescription": "VetPaw needs microphone access for voice input and pet sound analysis",
-        "NSPhotoLibraryUsageDescription": "VetPaw needs photo library access to select pet images for AI analysis"
+        "NSCameraUsageDescription": "PawPal needs camera access to take photos of your pet for AI analysis",
+        "NSMicrophoneUsageDescription": "PawPal needs microphone access for hands-free voice commands and speech recognition.",
+        "NSPhotoLibraryUsageDescription": "PawPal needs photo library access to select pet images for AI analysis",
+        "NSSpeechRecognitionUsageDescription": "PawPal needs speech recognition access to convert your voice to text for hands-free interaction."
       },
-      "bundleIdentifier": "com.naveedahmedswe.vetpawaidogcare",
-      "associatedDomains": ["applinks:vetpaw-ai-dog-care.com"]
+      "associatedDomains": [
+        "applinks:pawpal-ai-dog-care.com"
+      ]
     },
     "android": {
+      "package": "com.pawpal.pawpalapp",
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/Vet Paw app icon.png",
+        "foregroundImage": "./assets/images/PawPal app icon.png",
         "backgroundColor": "#FFF8E1"
       },
       "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
         "com.android.vending.BILLING"
       ],
-      "package": "com.naveedahmedswe.vetpawaidogcare",
       "intentFilters": [
         {
           "action": "VIEW",
           "autoVerify": true,
           "data": [
             {
-              "scheme": "vetpaw",
-              "host": "auth-callback"
+              "scheme": "vetpaw"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -63,14 +66,14 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "VetPaw needs access to your photo library to select pet images for AI analysis",
-          "cameraPermission": "VetPaw needs camera access to take photos of your pet for AI analysis"
+          "photosPermission": "PawPal needs access to your photo library to select pet images for AI analysis",
+          "cameraPermission": "PawPal needs camera access to take photos of your pet for AI analysis"
         }
       ],
       [
         "expo-av",
         {
-          "microphonePermission": "VetPaw needs microphone access for voice input and pet sound analysis"
+          "microphonePermission": "PawPal needs microphone access for voice input and pet sound analysis"
         }
       ],
       [
@@ -84,15 +87,13 @@
       "typedRoutes": true
     },
     "extra": {
+      "router": {},
       "eas": {
-        "projectId": "9a64ae34-2d8e-4dc7-b562-897bf5eac941"
-      }
+        "projectId": "1b3a0db7-344c-490d-a09f-b6989505472c"
+      },
+      "supabaseUrl": "https://tisdiucvwgvnvgggdwii.supabase.co",
+      "supabaseAnonKey": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpc2RpdWN2d2d2bnZnZ2dkd2lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk1NjE0NjEsImV4cCI6MjA2NTEzNzQ2MX0.aqD8fOfCQddC_-ON8_037Q_I5x9kX0NIlZwcyaBtUTo"
     },
-    "owner": "vetpaw",
-    "splash": {
-      "image": "./assets/images/splash screen.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FFF8E1"
-    }
+    "owner": "naveedahmedswe"
   }
 }

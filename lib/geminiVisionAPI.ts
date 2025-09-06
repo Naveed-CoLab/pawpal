@@ -1,5 +1,3 @@
-import { ApiConfig, validateGeminiApiKey } from '@/constants/apiConfig';
-import { VISION_ANALYSIS_PROMPT } from '@/constants/prompts';
 import { MediaResult } from './mediaUtils';
 
 export interface VisionAnalysisResult {
@@ -13,9 +11,6 @@ export interface VisionAnalysisResult {
 }
 
 export class GeminiVisionAPI {
-  private static baseUrl = ApiConfig.GEMINI.API_URL;
-  private static apiKey = ApiConfig.GEMINI.API_KEY;
-  private static useFallback = ApiConfig.GEMINI.USE_FALLBACK_RESPONSES;
 
   static async analyzeMedia(
     media: MediaResult,
@@ -23,60 +18,78 @@ export class GeminiVisionAPI {
     customPrompt?: string
   ): Promise<VisionAnalysisResult> {
     try {
-      console.log('🔍 Starting Gemini Vision analysis for:', media.type);
+      console.log('🔍 Starting Vision analysis for:', media.type);
 
-      // Check if API key is properly configured
-      if (!this.apiKey || this.apiKey === '' || !validateGeminiApiKey(this.apiKey)) {
-        console.log('🔄 Vision: Using fallback analysis - API key not configured or invalid');
+      // Get current user session for authentication
+      const { supabase } = await import('@/lib/supabase');
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        console.log('🔄 Vision: No active session, using fallback analysis');
         await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
         return this.getFallbackAnalysis(media, userMessage);
       }
 
-      // If fallback is enabled, use fallback responses
-      if (this.useFallback) {
-        console.log('🔄 Vision: Using fallback analysis - Gemini API disabled');
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
-        return this.getFallbackAnalysis(media, userMessage);
-      }
+             // Ensure base64
+       if (!media.base64 && media.uri) {
+         const FileSystem = await import('expo-file-system');
+         media.base64 = await FileSystem.readAsStringAsync(media.uri, {
+           encoding: FileSystem.EncodingType.Base64,
+         });
+         media.mimeType = 'image/jpeg';
+       }
 
-      // Prepare the prompt
-      const systemPrompt = customPrompt || VISION_ANALYSIS_PROMPT;
-      const userPrompt = userMessage || `Please analyze this ${media.type} of my pet and provide a comprehensive health assessment.`;
+      console.log('📡 Vision: Making request to ai-vision edge function...');
 
-      // Prepare the request body based on media type
-      const requestBody = await this.prepareRequestBody(media, systemPrompt, userPrompt);
-
-      const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ai-vision`, {
         method: 'POST',
         headers: {
+          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify({
+          image: {
+            base64: media.base64,
+            mimeType: media.mimeType,
+            type: media.type,
+            name: media.name
+          },
+          analysis_type: 'health',
+          userMessage: userMessage,
+          customPrompt: customPrompt
+        }),
       });
 
+      console.log('📥 Vision: Received response from edge function, status:', response.status);
+
       if (!response.ok) {
-        // Read response as text for error logging
         const errorText = await response.text();
-        console.error('❌ Gemini Vision API error:', response.status, errorText);
-        throw new Error(`API request failed: ${response.status}, body: ${errorText}`);
+        console.error('❌ Vision: Edge function error response:', errorText);
+        throw new Error(`Edge function error! status: ${response.status}, body: ${errorText}`);
       }
 
-      // Only parse as JSON if response is ok
       const data = await response.json();
-      console.log('✅ Gemini Vision API response received');
-
-      // Extract the analysis from the response
-      const analysis = this.extractAnalysis(data);
       
-      // Parse the analysis to extract structured information
-      const result = this.parseAnalysisResult(analysis);
-      
-      console.log('🎯 Vision analysis completed:', result.urgency, 'urgency');
-      return result;
+      if (data.success && data.analysis) {
+        console.log('✅ Vision: Analysis received successfully from edge function');
+        if (data.fallback) {
+          console.log('🔄 Vision: Analysis generated using fallback');
+        }
+        console.log('🎯 Vision analysis completed:', data.analysis.urgency, 'urgency');
+        return data.analysis;
+      } else {
+        console.error('❌ Vision: Invalid response structure from edge function:', data);
+        throw new Error('Invalid response structure from edge function');
+      }
 
     } catch (error) {
-      console.error('💥 Error in Gemini Vision analysis:', error);
-      Alert.alert('Analysis Error', 'Failed to analyze the image. Please try again later.');
+      console.error('💥 Error in Vision analysis:', error);
+      try {
+        const { Alert } = await import('react-native');
+        Alert.alert('Analysis Error', 'Failed to analyze the image. Please try again later.');
+      } catch (importError) {
+        console.error('Failed to import Alert:', importError);
+      }
       return {
         analysis: "I'm having trouble analyzing this media right now. For any health concerns about your pet, please consult with a veterinarian directly. 🏥🐾",
         confidence: 'low',

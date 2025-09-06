@@ -1,0 +1,2 @@
+[functions.tavus-webhook]
+verify_jwt = false 

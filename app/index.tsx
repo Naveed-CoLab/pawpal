@@ -18,6 +18,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '@/hooks/useAuth';
+import { onboardingService } from '@/lib/onboardingService';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 
@@ -27,6 +28,8 @@ export default function SplashScreen() {
   const { isAuthenticated, isLoading, validateSession } = useAuth();
   const [showText, setShowText] = useState(false);
   const [navigationHandled, setNavigationHandled] = useState(false);
+  const [isValidatingSession, setIsValidatingSession] = useState(false);
+  const [initialScreen, setInitialScreen] = useState<'onboarding' | 'login' | 'home' | null>(null);
   const logoScale = useSharedValue(0);
   const logoRotation = useSharedValue(0);
   const textOpacity = useSharedValue(0);
@@ -70,34 +73,90 @@ export default function SplashScreen() {
     }, 1200);
   }, []);
 
-  // Handle navigation after auth state is determined
+  // Determine initial screen based on onboarding and auth status
   useEffect(() => {
-    if (!isLoading && !navigationHandled) {
-      const timer = setTimeout(async () => {
-        console.log('Splash: Handling navigation', { isAuthenticated, isLoading });
-        
-        if (isAuthenticated) {
-          // Validate session before proceeding
-          const isValid = await validateSession();
-          if (isValid) {
-            console.log('Splash: Valid session, navigating to tabs');
-            setNavigationHandled(true);
-            router.replace('/(tabs)');
-          } else {
-            console.log('Splash: Invalid session, navigating to onboarding');
-            setNavigationHandled(true);
-            router.replace('/onboarding');
-          }
-        } else {
-          console.log('Splash: Not authenticated, navigating to onboarding');
-          setNavigationHandled(true);
-          router.replace('/onboarding');
-        }
-      }, 3500);
+    const determineInitialScreen = async () => {
+      if (isLoading || navigationHandled) return;
 
-      return () => clearTimeout(timer);
-    }
+      console.log('🚀 Splash: Determining initial screen...');
+      
+      try {
+        // Check onboarding completion status
+        const onboardingCompleted = await onboardingService.isOnboardingCompleted();
+        console.log('🎯 Splash: Onboarding completed:', onboardingCompleted);
+
+        if (!onboardingCompleted) {
+          console.log('📱 Splash: Onboarding not completed, showing onboarding');
+          setInitialScreen('onboarding');
+          return;
+        }
+
+        // If onboarding is completed, check authentication
+        if (isAuthenticated) {
+          console.log('✅ Splash: User authenticated, navigating to home');
+          setInitialScreen('home');
+          return;
+        }
+
+        // Validate session if not immediately authenticated - with faster timeout
+        setIsValidatingSession(true);
+        console.log('🔍 Splash: Validating session...');
+        
+        // Use Promise.race to add timeout to session validation
+        const validationPromise = validateSession();
+        const timeoutPromise = new Promise<boolean>((_, reject) =>
+          setTimeout(() => reject(new Error('Session validation timeout')), 3000)
+        );
+        
+        const isSessionValid = await Promise.race([validationPromise, timeoutPromise]);
+        
+        if (isSessionValid) {
+          console.log('✅ Splash: Session validated, navigating to home');
+          setInitialScreen('home');
+        } else {
+          console.log('❌ Splash: Session invalid, navigating to login');
+          setInitialScreen('login');
+        }
+      } catch (error) {
+        console.error('💥 Splash: Error determining initial screen:', error);
+        // If session validation times out, assume user needs to login
+        setInitialScreen('login');
+      } finally {
+        setIsValidatingSession(false);
+      }
+    };
+
+    determineInitialScreen();
   }, [isLoading, isAuthenticated, navigationHandled, validateSession]);
+
+  // Handle navigation once initial screen is determined
+  useEffect(() => {
+    if (initialScreen && !navigationHandled) {
+      console.log('🚀 Splash: Navigating to initial screen:', initialScreen);
+      setNavigationHandled(true);
+      
+      switch (initialScreen) {
+        case 'onboarding':
+          router.replace('/onboarding');
+          break;
+        case 'login':
+          router.replace('/auth');
+          break;
+        case 'home':
+          router.replace('/(tabs)');
+          break;
+      }
+    }
+  }, [initialScreen, navigationHandled]);
+
+  // Handle immediate navigation if auth state changes while splash is shown
+  useEffect(() => {
+    if (!isLoading && !navigationHandled && isAuthenticated && initialScreen === 'home') {
+      console.log('🚀 Splash: Auth state changed to authenticated, navigating immediately');
+      setNavigationHandled(true);
+      router.replace('/(tabs)');
+    }
+  }, [isAuthenticated, isLoading, navigationHandled, initialScreen]);
 
   const logoAnimatedStyle = useAnimatedStyle(() => ({
     transform: [
@@ -117,13 +176,13 @@ export default function SplashScreen() {
 
   return (
     <LinearGradient
- colors={[Colors.background, Colors.background]}   // ← fix here
+      colors={[Colors.background, Colors.background]}
       style={styles.container}
     >
       <View style={styles.content}>
         <Animated.View style={[styles.logoContainer, logoAnimatedStyle]}>
           <Image
-            source={require('@/assets/images/splash screen.png')}
+            source={require('@/assets/images/splash-screen.png')}
             style={styles.logo}
             resizeMode="contain"
           />
@@ -131,7 +190,7 @@ export default function SplashScreen() {
 
         {showText && (
           <Animated.View style={[styles.textContainer, textAnimatedStyle]}>
-            <Text style={styles.title}>VetPaw</Text>
+            <Text style={styles.title}>PawPal</Text>
             <Text style={styles.subtitle}>AI Dog Care Assistant</Text>
             <Text style={styles.description}>
               Your companion for happy, healthy pets

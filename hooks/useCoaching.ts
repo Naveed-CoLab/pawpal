@@ -50,9 +50,9 @@ export function useCoaching() {
     if (!user?.id) return { data: null, error: 'No user found' };
     
     try {
-      console.log('🎬 Starting new coaching session with James...');
+      console.log('🎬 Starting new coaching session with Luna...');
       
-      // Create Tavus session with James
+      // Create Tavus session with Luna
       const tavusSession = await tavusService.createCoachingSession(sessionData);
       setCurrentSession(tavusSession);
       setSessionMessages([]);
@@ -93,7 +93,7 @@ export function useCoaching() {
         return { data: null, error: 'No active session' };
       }
 
-      console.log('💬 Sending message to James...');
+      console.log('💬 Sending message to Luna...');
       
       // Add user message to local state immediately
       const userMessage: TavusMessage = {
@@ -106,7 +106,7 @@ export function useCoaching() {
       
       setSessionMessages(prev => [...prev, userMessage]);
 
-      // Send to Tavus and get James's response
+      // Send to Tavus and get Luna's response
       const aiResponse = await tavusService.sendMessage(currentSession.session_id, message);
       
       // Add AI response to local state
@@ -141,7 +141,7 @@ export function useCoaching() {
         return { error: 'Session not found' };
       }
 
-      console.log('🏁 Ending coaching session with James...');
+      console.log('🏁 Ending coaching session with Luna...');
 
       // End Tavus session
       await tavusService.endSession(currentSession.session_id);

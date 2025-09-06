@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,8 +19,13 @@ import { ApiConfig, validateGeminiApiKey } from '@/constants/apiConfig';
 import { HEALTH_ANALYSIS_SYSTEM_PROMPT } from '@/constants/prompts';
 import { useAuth } from '@/hooks/useAuth';
 import { useSymptomAssessments } from '@/hooks/useDatabase';
-import { Heart, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Clock, Thermometer, Activity, MapPin, Phone, Bell, Save, Search, Navigation } from 'lucide-react-native';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import RevenueCatPaywall from '@/components/ui/RevenueCatPaywall';
+import Purchases from 'react-native-purchases';
+import { fixSubscriptionStatus } from '@/lib/fixSubscription';
+import { Heart, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Clock, Thermometer, Activity, MapPin, Phone, Bell, Save, Search, Navigation, Crown } from 'lucide-react-native';
 import { router } from 'expo-router';
+import { supabase } from '@/lib/supabase';
 
 interface Symptom {
   id: string;
@@ -65,13 +70,95 @@ const emergencySymptoms: Symptom[] = [
 ];
 
 export default function HealthScreen() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const { createAssessment, assessments } = useSymptomAssessments();
+  const { isSubscribed, isLoading: subscriptionLoading } = useSubscriptionStatus();
   const [selectedSymptoms, setSelectedSymptoms] = useState<Symptom[]>(emergencySymptoms);
   const [aiAssessment, setAiAssessment] = useState<AIAssessment | null>(null);
   const [userLocation, setUserLocation] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [monthlyUsage, setMonthlyUsage] = useState(0);
+  const [isLoadingUsage, setIsLoadingUsage] = useState(true);
+
+  // Rate limiting constants
+  const FREE_MONTHLY_LIMIT = 4;
+
+  // Check monthly usage on component mount
+  useEffect(() => {
+    if (user && !subscriptionLoading) {
+      checkMonthlyUsage();
+    }
+  }, [user, subscriptionLoading]);
+
+  const checkMonthlyUsage = async () => {
+    if (!user) return;
+    
+    try {
+      setIsLoadingUsage(true);
+      
+      // Get the start of current month
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      
+      // Query assessments from this month
+      const { data, error } = await supabase
+        .from('symptom_assessments')
+        .select('id')
+        .eq('user_id', user.id)
+        .gte('created_at', startOfMonth.toISOString());
+      
+      if (error) {
+        console.error('Error checking monthly usage:', error);
+        setMonthlyUsage(0);
+      } else {
+        setMonthlyUsage(data?.length || 0);
+      }
+    } catch (error) {
+      console.error('Error in checkMonthlyUsage:', error);
+      setMonthlyUsage(0);
+    } finally {
+      setIsLoadingUsage(false);
+    }
+  };
+
+  const handlePaywallSuccess = () => {
+    setShowPaywall(false);
+    checkMonthlyUsage();
+  };
+
+  const handlePaywallClose = () => {
+    setShowPaywall(false);
+  };
+
+  const handleRestorePurchases = async () => {
+    try {
+      const customerInfo = await Purchases.restorePurchases();
+      await fixSubscriptionStatus();
+      
+      if (Object.keys(customerInfo.entitlements.active).length > 0) {
+        Alert.alert('Success', 'Your purchases have been restored!');
+        checkMonthlyUsage();
+      } else {
+        Alert.alert('No Purchases', 'No previous purchases found to restore.');
+      }
+    } catch (error) {
+      console.error('Restore error:', error);
+      Alert.alert('Error', 'Failed to restore purchases. Please try again.');
+    }
+  };
+
+  const canUseSymptomChecker = () => {
+    if (subscriptionLoading || isLoadingUsage) return false;
+    if (isSubscribed) return true;
+    return monthlyUsage < FREE_MONTHLY_LIMIT;
+  };
+
+  const getRemainingChecks = () => {
+    if (isSubscribed) return '∞';
+    return Math.max(0, FREE_MONTHLY_LIMIT - monthlyUsage);
+  };
 
   const toggleSymptom = (id: string) => {
     setSelectedSymptoms(prev =>
@@ -85,118 +172,64 @@ export default function HealthScreen() {
   };
 
   const callGeminiAPI = async (symptoms: string[]): Promise<AIAssessment> => {
-    console.log('🤖 Health: Starting Gemini API call for symptom analysis');
+    console.log('🤖 Health: Starting API call to edge function for symptom analysis');
     
-    // Check if API key is properly configured
-    if (!ApiConfig.GEMINI.API_KEY || ApiConfig.GEMINI.API_KEY === '' || !validateGeminiApiKey(ApiConfig.GEMINI.API_KEY)) {
-      console.log('🔄 Health: Using fallback analysis - API key not configured or invalid');
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
-      return getFallbackAssessment(symptoms);
-    }
-
-    // If fallback is enabled, use fallback responses
-    if (ApiConfig.GEMINI.USE_FALLBACK_RESPONSES) {
-      console.log('🔄 Health: Using fallback analysis');
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
-      return getFallbackAssessment(symptoms);
-    }
-    
-    const symptomPrompt = `
-    ${HEALTH_ANALYSIS_SYSTEM_PROMPT}
-    
-    CLINICAL CASE PRESENTATION:
-    Patient: Canine
-    Chief Complaints: ${symptoms.join(', ')}
-    Owner Location: ${userLocation || 'Not specified'}
-    
-    Please provide a comprehensive veterinary assessment in this EXACT JSON format:
-    {
-      "urgencyLevel": "mild|moderate|emergency",
-      "symptomSummary": ["${symptoms.join('", "')}"],
-      "analysis": "Detailed clinical analysis explaining the pathophysiology and significance of this specific symptom combination. Discuss differential diagnoses and explain why these symptoms together are concerning. Be specific to these exact symptoms.",
-      "immediateActions": ["Specific action 1 based on symptoms", "Specific action 2 for this combination", "Specific monitoring instruction"],
-      "warnings": ["Specific red flag for this condition", "Specific complication to watch for"],
-      "vetRecommendation": "Precise timeline recommendation with medical justification",
-      "possibleCauses": ["Most likely differential diagnosis", "Secondary differential", "Less likely but possible cause"],
-      "color": "#color_code_based_on_urgency",
-      "icon": "mild|moderate|emergency"
-    }
-    
-    CLINICAL REQUIREMENTS:
-    - Analyze this SPECIFIC symptom combination (${symptoms.join(' + ')})
-    - Explain WHY these symptoms together are significant
-    - Provide unique analysis - not generic responses
-    - Include specific monitoring parameters for these symptoms
-    - Give precise timeline based on clinical progression
-    - Explain the pathophysiology behind your recommendations
-    - Focus on differential diagnosis for this presentation
-    
-    URGENCY CLASSIFICATION:
-    - emergency: Immediate life threat, 0-2 hours (#F44336)
-    - moderate: Significant concern, 24-48 hours (#FF9800)  
-    - mild: Monitoring appropriate, routine care (#4CAF50)
-    
-    Provide a professional veterinary consultation as if speaking to a concerned pet owner in your clinic.
-    `;
-
     try {
-      const response = await fetch(`${ApiConfig.GEMINI.API_URL}?key=${ApiConfig.GEMINI.API_KEY}`, {
+      // Get current user session for authentication
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      console.log('🔐 Health: Session debug info:');
+      console.log('- Session error:', sessionError);
+      console.log('- Has session:', !!session);
+      console.log('- User ID:', session?.user?.id);
+      console.log('- Token expires at:', session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'unknown');
+      console.log('- Token preview:', session?.access_token?.substring(0, 20) + '...');
+      
+      if (sessionError || !session) {
+        console.log('🔄 Health: No active session, using fallback analysis');
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate API delay
+        return getFallbackAssessment(symptoms);
+      }
+
+      console.log('📡 Health: Making request to ai-health edge function...');
+      console.log('🌐 URL:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ai-health`);
+      console.log('🔑 Auth header preview:', `Bearer ${session.access_token.substring(0, 20)}...`);
+
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ai-health`, {
         method: 'POST',
         headers: {
+          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          contents: [
-            {
-              parts: [{ text: symptomPrompt }]
-            }
-          ],
-          generationConfig: {
-            temperature: 0.3,
-            topK: 40,
-            topP: 0.95,
-            maxOutputTokens: 1024,
-          },
+          symptoms: symptoms,
+          userLocation: userLocation
         }),
       });
 
+      console.log('📥 Health: Received response from edge function, status:', response.status);
+
       if (!response.ok) {
-        // Read response as text for error logging
         const errorText = await response.text();
-        console.error('❌ Health: HTTP error response:', errorText);
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+        console.error('❌ Health: Edge function error response:', errorText);
+        throw new Error(`Edge function error! status: ${response.status}, body: ${errorText}`);
       }
 
-      // Only parse as JSON if response is ok
       const data = await response.json();
       
-      if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
-        const aiResponse = data.candidates[0].content.parts[0].text;
-        
-        try {
-          // Clean the response by removing markdown code blocks
-          let cleanedResponse = aiResponse.trim();
-          if (cleanedResponse.startsWith('```json')) {
-            cleanedResponse = cleanedResponse.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-          } else if (cleanedResponse.startsWith('```')) {
-            cleanedResponse = cleanedResponse.replace(/^```\s*/, '').replace(/\s*```$/, '');
-          }
-          
-          const parsedResponse = JSON.parse(cleanedResponse);
-          return parsedResponse;
-        } catch (parseError) {
-          console.error('❌ Failed to parse AI response:', parseError);
-          console.log('Raw AI response:', aiResponse);
-          Alert.alert('Analysis Error', 'Failed to process the AI response. Please try again.');
-          throw new Error('Failed to parse AI response');
+      if (data.success && data.assessment) {
+        console.log('✅ Health: Assessment received successfully from edge function');
+        if (data.fallback) {
+          console.log('🔄 Health: Assessment generated using fallback');
         }
+        return data.assessment;
       } else {
-        console.error('❌ Invalid response structure:', data);
-        Alert.alert('Analysis Error', 'Received an invalid response from the AI. Please try again.');
-        throw new Error('Invalid response structure from Gemini API');
+        console.error('❌ Health: Invalid response structure from edge function:', data);
+        Alert.alert('Analysis Error', 'Received an invalid response from the health assessment service. Please try again.');
+        throw new Error('Invalid response structure from edge function');
       }
     } catch (error) {
-      console.error('💥 Health: Gemini API Error:', error);
+      console.error('💥 Health: Edge function Error:', error);
       Alert.alert('Analysis Error', 'Failed to analyze symptoms. Please try again later.');
       return getFallbackAssessment(symptoms);
     }
@@ -333,12 +366,28 @@ export default function HealthScreen() {
       return;
     }
 
+    // Check rate limiting for free users
+    if (!subscriptionLoading && !isSubscribed && monthlyUsage >= FREE_MONTHLY_LIMIT) {
+      Alert.alert(
+        'Usage Limit Reached',
+        `You've used all ${FREE_MONTHLY_LIMIT} free symptom checks this month. Upgrade to Premium for unlimited assessments!`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Upgrade to Premium', onPress: () => setShowPaywall(true) }
+        ]
+      );
+      return;
+    }
+
     setIsAnalyzing(true);
     const symptomNames = selected.map(s => s.name);
     
     try {
       const assessment = await callGeminiAPI(symptomNames);
       setAiAssessment(assessment);
+      
+      // Update usage count after successful assessment
+      setMonthlyUsage(prev => prev + 1);
     } catch (error) {
       console.error('Assessment error:', error);
       Alert.alert('Analysis Error', 'Failed to analyze symptoms. Please try again.');
@@ -398,7 +447,18 @@ export default function HealthScreen() {
       setIsSaving(false);
     }
   };
-
+    
+  const handleFeaturePress = (feature: string) => {
+    switch (feature) {
+      case 'history':
+        router.push('/(tabs)/history');
+        break;
+      default:
+        // For now, navigate to a 404 page - you can replace these later
+        router.push('/+not-found');
+        break;
+    }
+  };
   const findNearbyVets = () => {
     const query = userLocation 
       ? `veterinary emergency clinic near ${userLocation}`
@@ -438,224 +498,305 @@ export default function HealthScreen() {
     }
   };
 
+  const renderPremiumPrompt = () => (
+    <Card variant="elevated" style={styles.premiumCard}>
+      <View style={styles.premiumContent}>
+        <View style={styles.premiumIcon}>
+          <Crown size={40} color="#ff9d00" />
+        </View>
+        <Text style={styles.premiumTitle}>Upgrade for Unlimited Access</Text>
+        <Text style={styles.premiumDescription}>
+          You've used all {FREE_MONTHLY_LIMIT} free symptom checks this month. Upgrade to Premium for unlimited health assessments and priority support!
+        </Text>
+        
+        <TouchableOpacity
+          style={styles.upgradeButton}
+          onPress={() => setShowPaywall(true)}
+        >
+          <Crown size={20} color={Colors.white} />
+          <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.upgradeButton, styles.restoreButton]}
+          onPress={handleRestorePurchases}
+        >
+          <Text style={[styles.upgradeButtonText, styles.restoreButtonText]}>Restore Purchases</Text>
+        </TouchableOpacity>
+        
+        <View style={styles.featureList}>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>🏥</Text>
+            <Text style={styles.featureText}>Unlimited symptom assessments</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>🤖</Text>
+            <Text style={styles.featureText}>AI-powered health analysis</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>⚡</Text>
+            <Text style={styles.featureText}>Priority veterinary guidance</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>📊</Text>
+            <Text style={styles.featureText}>Detailed health history tracking</Text>
+          </View>
+        </View>
+      </View>
+    </Card>
+  );
+
   return (
-    <LinearGradient
-      colors={Colors.backgroundGradient}
-      style={styles.container}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
+    <View style={styles.container}>
+      <LinearGradient
+        colors={Colors.backgroundGradient}
+        style={styles.container}
       >
-        <View style={styles.header}>
-          <Heart size={32} color={Colors.primary} />
-          <Text style={styles.headerTitle}>Emergency Symptom Checker</Text>
-          <Text style={styles.headerSubtitle}>
-            Select symptoms and get AI-powered veterinary guidance
-          </Text>
-          <TouchableOpacity 
-            style={styles.historyButton}
-            onPress={() => {
-              Alert.alert(
-                'Assessment History',
-                'Please tap on the History tab at the bottom of the screen to view your past assessments.',
-                [{ text: 'OK' }]
-              );
-            }}
-          >
-            <Clock size={16} color={Colors.primary} />
-            <Text style={styles.historyButtonText}>View Assessment History</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Location Search */}
-        <Card variant="elevated" style={styles.locationCard}>
-          <View style={styles.locationHeader}>
-            <MapPin size={20} color={Colors.primary} />
-            <Text style={styles.locationTitle}>Your Location (Optional)</Text>
-          </View>
-          <View style={styles.locationInputContainer}>
-            <TextInput
-              style={styles.locationInput}
-              value={userLocation}
-              onChangeText={setUserLocation}
-              placeholder="Enter city or zip code for nearby vets..."
-              placeholderTextColor={Colors.disabled}
-            />
-            <TouchableOpacity style={styles.searchButton} onPress={findNearbyVets}>
-              <Search size={16} color={Colors.white} />
-            </TouchableOpacity>
-          </View>
-        </Card>
-
-        <Card variant="elevated" style={styles.symptomsCard}>
-          <Text style={styles.sectionTitle}>Current Symptoms</Text>
-          <View style={styles.symptomsGrid}>
-            {selectedSymptoms.map((symptom) => (
-              <TouchableOpacity
-                key={symptom.id}
-                style={[
-                  styles.symptomChip,
-                  symptom.selected && styles.symptomChipSelected,
-                  symptom.selected && {
-                    backgroundColor: getSeverityColor(symptom.severity) + '20',
-                    borderColor: getSeverityColor(symptom.severity),
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <Heart size={32} color={Colors.primary} />
+            <Text style={styles.headerTitle}>Emergency Symptom Checker</Text>
+            <Text style={styles.headerSubtitle}>
+              Select symptoms and get AI-powered veterinary guidance
+            </Text>
+            
+            {/* Usage Status Display */}
+            {!subscriptionLoading && (
+              <View style={styles.usageCard}>
+                <View style={styles.usageHeader}>
+                  <Text style={styles.usageTitle}>
+                    {isSubscribed ? '👑 Premium' : '🆓 Free Plan'}
+                  </Text>
+                  <Text style={styles.usageCount}>
+                    {isSubscribed ? 'Unlimited' : `${Math.max(0, 4 - monthlyUsage)} remaining`}
+                  </Text>
+                </View>
+                <Text style={styles.usageDetails}>
+                  {isSubscribed 
+                    ? 'Enjoy unlimited symptom checks and priority support'
+                    : `${monthlyUsage}/4 symptom checks used this month`
                   }
-                ]}
-                onPress={() => toggleSymptom(symptom.id)}
-              >
-                <Text style={[
-                  styles.symptomText,
-                  symptom.selected && {
-                    color: getSeverityColor(symptom.severity),
-                    fontFamily: Fonts.body.bold,
-                  }
-                ]}>
-                  {symptom.name}
                 </Text>
-                {symptom.severity === 'high' && (
-                  <AlertTriangle size={12} color={Colors.error} />
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Card>
-
-        <View style={styles.buttonContainer}>
-          <Button
-            title={isAnalyzing ? "Analyzing..." : "AI Health Assessment"}
-            onPress={assessHealthWithAI}
-            style={styles.assessButton}
-            disabled={isAnalyzing}
-          />
-          <Button
-            title="Clear All"
-            onPress={clearAssessment}
-            variant="outline"
-            style={styles.clearButton}
-          />
-        </View>
-
-        {isAnalyzing && (
-          <Card variant="elevated" style={styles.loadingCard}>
-            <View style={styles.loadingContent}>
-              <ActivityIndicator size="large" color={Colors.primary} />
-              <Text style={styles.loadingText}>
-                🤖 AI is analyzing symptoms...
-              </Text>
-              <Text style={styles.loadingSubtext}>
-                Getting professional veterinary guidance
-              </Text>
-            </View>
-          </Card>
-        )}
-
-        {aiAssessment && (
-          <Card
-            variant="elevated"
-            style={[
-              styles.assessmentCard,
-              { borderLeftColor: aiAssessment.color }
-            ]}
-          >
-            {/* Urgency Level Header */}
-            <View style={styles.assessmentHeader}>
-              <View style={[styles.urgencyIcon, { backgroundColor: aiAssessment.color }]}>
-                {aiAssessment.urgencyLevel === 'emergency' && <AlertTriangle size={20} color={Colors.white} />}
-                {aiAssessment.urgencyLevel === 'moderate' && <Clock size={20} color={Colors.white} />}
-                {aiAssessment.urgencyLevel === 'mild' && <CheckCircle size={20} color={Colors.white} />}
-              </View>
-              <Text style={[
-                styles.assessmentLevel,
-                { color: aiAssessment.color }
-              ]}>
-                {aiAssessment.urgencyLevel.toUpperCase()} PRIORITY
-              </Text>
-            </View>
-
-            {/* Symptom Summary */}
-            <View style={styles.symptomSummaryContainer}>
-              <Text style={styles.symptomSummaryTitle}>Symptoms Analyzed:</Text>
-              <View style={styles.symptomTags}>
-                {aiAssessment.symptomSummary.map((symptom, index) => (
-                  <View key={index} style={[styles.symptomTag, { borderColor: aiAssessment.color }]}>
-                    <Text style={[styles.symptomTagText, { color: aiAssessment.color }]}>{symptom}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-
-            {/* AI Analysis */}
-            <Text style={styles.analysisTitle}>Professional Analysis:</Text>
-            <Text style={styles.assessmentMessage}>{aiAssessment.analysis}</Text>
-
-            {/* Immediate Actions */}
-            <Text style={styles.actionsTitle}>Immediate Actions:</Text>
-            {aiAssessment.immediateActions.map((action, index) => (
-              <Text key={index} style={styles.actionItem}>• {action}</Text>
-            ))}
-
-            {/* Warnings */}
-            {aiAssessment.warnings.length > 0 && (
-              <View style={styles.warningsContainer}>
-                <Text style={styles.warningsTitle}>⚠️ Important Warnings:</Text>
-                {aiAssessment.warnings.map((warning, index) => (
-                  <Text key={index} style={styles.warningItem}>• {warning}</Text>
-                ))}
               </View>
             )}
-
-            {/* Vet Recommendation */}
-            <View style={[styles.vetRecommendation, { backgroundColor: aiAssessment.color + '15' }]}>
-              <Text style={styles.vetRecommendationTitle}>Veterinary Recommendation:</Text>
-              <Text style={styles.vetRecommendationText}>{aiAssessment.vetRecommendation}</Text>
+            
+            <TouchableOpacity 
+              style={styles.historyButton}
+              onPress={() => handleFeaturePress('history')}
+            >
+              <Clock size={16} color={Colors.primary} />
+              <Text style={styles.historyButtonText}>View Assessment History</Text>
+            </TouchableOpacity>
+          </View>
+      
+          {/* Location Search */}
+          <Card variant="elevated" style={styles.locationCard}>
+            <View style={styles.locationHeader}>
+              <MapPin size={20} color={Colors.primary} />
+              <Text style={styles.locationTitle}>Your Location (Optional)</Text>
             </View>
-
-            {/* Possible Causes */}
-            <Text style={styles.causesTitle}>Possible Causes:</Text>
-            <Text style={styles.causesText}>{aiAssessment.possibleCauses.join(', ')}</Text>
-
-            {/* Action Buttons */}
-            <View style={styles.actionButtonsContainer}>
-              {aiAssessment.urgencyLevel === 'emergency' && (
-                <Button
-                  title="🚨 Call Emergency Vet"
-                  onPress={callEmergencyVet}
-                  style={[styles.emergencyButton, { backgroundColor: Colors.error }]}
-                />
-              )}
-              <Button
-                title="📍 Find Nearby Vets"
-                onPress={findNearbyVets}
-                variant="outline"
-                style={styles.findVetsButton}
+            <View style={styles.locationInputContainer}>
+              <TextInput
+                style={styles.locationInput}
+                value={userLocation}
+                onChangeText={setUserLocation}
+                placeholder="Enter city or zip code for nearby vets..."
+                placeholderTextColor={Colors.disabled}
               />
-              <Button
-                title={isSaving ? "💾 Saving..." : "💾 Save Case"}
-                onPress={saveCase}
-                variant="outline"
-                style={styles.saveCaseButton}
-                disabled={isSaving}
-              />
+              <TouchableOpacity style={styles.searchButton} onPress={findNearbyVets}>
+                <Search size={16} color={Colors.white} />
+              </TouchableOpacity>
             </View>
           </Card>
-        )}
 
-        <Card variant="outlined" style={styles.infoCard}>
-          <View style={styles.infoHeader}>
-            <Activity size={20} color={Colors.primary} />
-            <Text style={styles.infoTitle}>Health Monitoring Tips</Text>
+          <Card variant="elevated" style={styles.symptomsCard}>
+            <Text style={styles.sectionTitle}>Current Symptoms</Text>
+            <View style={styles.symptomsGrid}>
+              {selectedSymptoms.map((symptom) => (
+                <TouchableOpacity
+                  key={symptom.id}
+                  style={[
+                    styles.symptomChip,
+                    symptom.selected && styles.symptomChipSelected,
+                    symptom.selected && {
+                      backgroundColor: getSeverityColor(symptom.severity) + '20',
+                      borderColor: getSeverityColor(symptom.severity),
+                    }
+                  ]}
+                  onPress={() => toggleSymptom(symptom.id)}
+                >
+                  <Text style={[
+                    styles.symptomText,
+                    symptom.selected && {
+                      color: getSeverityColor(symptom.severity),
+                      fontFamily: Fonts.body.bold,
+                    }
+                  ]}>
+                    {symptom.name}
+                  </Text>
+                  {symptom.severity === 'high' && (
+                    <AlertTriangle size={12} color={Colors.error} />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Card>
+
+          <View style={styles.buttonContainer}>
+            <Button
+              title={isAnalyzing ? "Analyzing..." : "AI Health Assessment"}
+              onPress={assessHealthWithAI}
+              style={styles.assessButton}
+              disabled={isAnalyzing}
+            />
+            <Button
+              title="Clear All"
+              onPress={clearAssessment}
+              variant="outline"
+              style={styles.clearButton}
+            />
           </View>
-          <Text style={styles.infoText}>
-            • Monitor your dog's eating and drinking habits daily{'\n'}
-            • Check for changes in energy levels and behavior{'\n'}
-            • Regular grooming helps spot skin issues early{'\n'}
-            • Keep a health journal for vet visits{'\n'}
-            • Schedule regular check-ups with your veterinarian
-          </Text>
-        </Card>
-      </ScrollView>
-    </LinearGradient>
+
+          {/* Premium Prompt for users who have reached their limit */}
+          {!subscriptionLoading && !isSubscribed && monthlyUsage >= FREE_MONTHLY_LIMIT && renderPremiumPrompt()}
+
+          {isAnalyzing && (
+            <Card variant="elevated" style={styles.loadingCard}>
+              <View style={styles.loadingContent}>
+                <ActivityIndicator size="large" color={Colors.primary} />
+                <Text style={styles.loadingText}>
+                  🤖 AI is analyzing symptoms...
+                </Text>
+                <Text style={styles.loadingSubtext}>
+                  Getting professional veterinary guidance
+                </Text>
+              </View>
+            </Card>
+          )}
+
+          {aiAssessment && (
+            <Card
+              variant="elevated"
+              style={[
+                styles.assessmentCard,
+                { borderLeftColor: aiAssessment.color }
+              ]}
+            >
+              {/* Urgency Level Header */}
+              <View style={styles.assessmentHeader}>
+                <View style={[styles.urgencyIcon, { backgroundColor: aiAssessment.color }]}>
+                  {aiAssessment.urgencyLevel === 'emergency' && <AlertTriangle size={20} color={Colors.white} />}
+                  {aiAssessment.urgencyLevel === 'moderate' && <Clock size={20} color={Colors.white} />}
+                  {aiAssessment.urgencyLevel === 'mild' && <CheckCircle size={20} color={Colors.white} />}
+                </View>
+                <Text style={[
+                  styles.assessmentLevel,
+                  { color: aiAssessment.color }
+                ]}>
+                  {aiAssessment.urgencyLevel.toUpperCase()} PRIORITY
+                </Text>
+              </View>
+
+              {/* Symptom Summary */}
+              <View style={styles.symptomSummaryContainer}>
+                <Text style={styles.symptomSummaryTitle}>Symptoms Analyzed:</Text>
+                <View style={styles.symptomTags}>
+                  {aiAssessment.symptomSummary.map((symptom, index) => (
+                    <View key={index} style={[styles.symptomTag, { borderColor: aiAssessment.color }]}>
+                      <Text style={[styles.symptomTagText, { color: aiAssessment.color }]}>{symptom}</Text>
+                    </View>
+                  ))}
+                </View>
+              </View>
+
+              {/* AI Analysis */}
+              <Text style={styles.analysisTitle}>Professional Analysis:</Text>
+              <Text style={styles.assessmentMessage}>{aiAssessment.analysis}</Text>
+
+              {/* Immediate Actions */}
+              <Text style={styles.actionsTitle}>Immediate Actions:</Text>
+              {aiAssessment.immediateActions.map((action, index) => (
+                <Text key={index} style={styles.actionItem}>• {action}</Text>
+              ))}
+
+              {/* Warnings */}
+              {aiAssessment.warnings.length > 0 && (
+                <View style={styles.warningsContainer}>
+                  <Text style={styles.warningsTitle}>⚠️ Important Warnings:</Text>
+                  {aiAssessment.warnings.map((warning, index) => (
+                    <Text key={index} style={styles.warningItem}>• {warning}</Text>
+                  ))}
+                </View>
+              )}
+
+              {/* Vet Recommendation */}
+              <View style={[styles.vetRecommendation, { backgroundColor: aiAssessment.color + '15' }]}>
+                <Text style={styles.vetRecommendationTitle}>Veterinary Recommendation:</Text>
+                <Text style={styles.vetRecommendationText}>{aiAssessment.vetRecommendation}</Text>
+              </View>
+
+              {/* Possible Causes */}
+              <Text style={styles.causesTitle}>Possible Causes:</Text>
+              <Text style={styles.causesText}>{aiAssessment.possibleCauses.join(', ')}</Text>
+
+              {/* Action Buttons */}
+              <View style={styles.actionButtonsContainer}>
+                {aiAssessment.urgencyLevel === 'emergency' && (
+                  <Button
+                    title="🚨 Call Emergency Vet"
+                    onPress={callEmergencyVet}
+                    style={[styles.emergencyButton, { backgroundColor: Colors.error }]}
+                  />
+                )}
+                <Button
+                  title="📍 Find Nearby Vets"
+                  onPress={findNearbyVets}
+                  variant="outline"
+                  style={styles.findVetsButton}
+                />
+                <Button
+                  title={isSaving ? "💾 Saving..." : "💾 Save Case"}
+                  onPress={saveCase}
+                  variant="outline"
+                  style={styles.saveCaseButton}
+                  disabled={isSaving}
+                />
+              </View>
+            </Card>
+          )}
+
+          <Card variant="outlined" style={styles.infoCard}>
+            <View style={styles.infoHeader}>
+              <Activity size={20} color={Colors.primary} />
+              <Text style={styles.infoTitle}>Health Monitoring Tips</Text>
+            </View>
+            <Text style={styles.infoText}>
+              • Monitor your dog's eating and drinking habits daily{'\n'}
+              • Check for changes in energy levels and behavior{'\n'}
+              • Regular grooming helps spot skin issues early{'\n'}
+              • Keep a health journal for vet visits{'\n'}
+              • Schedule regular check-ups with your veterinarian
+            </Text>
+          </Card>
+        </ScrollView>
+      </LinearGradient>
+      
+      {/* Premium Paywall Modal */}
+      {showPaywall && (
+        <RevenueCatPaywall
+          visible={showPaywall}
+          onDismiss={handlePaywallClose}
+          onPurchaseCompleted={(customerInfo) => {
+            console.log('Purchase completed:', customerInfo);
+            handlePaywallSuccess();
+          }}
+          requiredEntitlementIdentifier="premium"
+        />
+      )}
+    </View>
   );
 }
 
@@ -952,22 +1093,21 @@ const styles = StyleSheet.create({
   },
   vetRecommendationText: {
     fontSize: 14,
-    fontFamily: Fonts.body.regular,
+    fontFamily: Fonts.body.medium,
     color: Colors.text,
-    lineHeight: 18,
   },
   causesTitle: {
     fontSize: 14,
     fontFamily: Fonts.body.bold,
     color: Colors.text,
     marginTop: 16,
-    marginBottom: 4,
+    marginBottom: 8,
   },
   causesText: {
     fontSize: 14,
     fontFamily: Fonts.body.regular,
-    color: Colors.disabled,
-    fontStyle: 'italic',
+    color: Colors.text,
+    lineHeight: 20,
   },
   actionButtonsContainer: {
     marginTop: 20,
@@ -998,5 +1138,98 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: Colors.primary,
     marginLeft: 6,
+  },
+  premiumCard: {
+    marginHorizontal: 24,
+    marginBottom: 20,
+  },
+  premiumContent: {
+    padding: 20,
+  },
+  premiumIcon: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  premiumTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.body.bold,
+    color: Colors.text,
+    marginBottom: 8,
+  },
+  premiumDescription: {
+    fontSize: 14,
+    fontFamily: Fonts.body.regular,
+    color: Colors.text,
+    marginBottom: 20,
+  },
+  upgradeButton: {
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  upgradeButtonText: {
+    fontSize: 16,
+    fontFamily: Fonts.body.bold,
+    color: Colors.white,
+  },
+  restoreButton: {
+    backgroundColor: Colors.accent,
+  },
+  restoreButtonText: {
+    color: Colors.text,
+  },
+  featureList: {
+    marginTop: 16,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  featureBullet: {
+    fontSize: 16,
+    fontFamily: Fonts.body.bold,
+    color: Colors.text,
+    marginRight: 8,
+  },
+  featureText: {
+    fontSize: 14,
+    fontFamily: Fonts.body.regular,
+    color: Colors.text,
+  },
+  usageCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 12,
+    shadowColor: Colors.text,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  usageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  usageTitle: {
+    fontSize: 14,
+    fontFamily: Fonts.body.bold,
+    color: Colors.text,
+  },
+  usageCount: {
+    fontSize: 14,
+    fontFamily: Fonts.body.semiBold,
+    color: Colors.primary,
+  },
+  usageDetails: {
+    fontSize: 12,
+    fontFamily: Fonts.body.regular,
+    color: Colors.disabled,
   },
 });

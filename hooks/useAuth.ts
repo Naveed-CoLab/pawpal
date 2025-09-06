@@ -13,9 +13,13 @@ interface UseAuthReturn {
   signInWithFacebook: () => Promise<{ data: any; error: string | null }>;
   signOut: () => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
+  updatePassword: (newPassword: string) => Promise<{ error: string | null }>;
+  setSessionFromTokens: (accessToken: string, refreshToken: string) => Promise<{ session: any; error: string | null }>;
+  verifyPasswordResetToken: (token: string) => Promise<{ session: any; error: string | null }>;
   updateProfile: (updates: Partial<AuthUser>) => Promise<{ data: any; error: string | null }>;
   validateSession: () => Promise<boolean>;
   refreshSession: () => Promise<{ session: Session | null; error: string | null }>;
+  retryLoadUserProfile: () => Promise<void>;
 }
 
 export function useAuth(): UseAuthReturn {
@@ -30,19 +34,48 @@ export function useAuth(): UseAuthReturn {
     const removeListener = authService.addListener((newUser, newSession) => {
       console.log('useAuth: Auth state changed', { 
         user: newUser?.email, 
-        hasSession: !!newSession 
+        hasSession: !!newSession,
+        isInitialized: authService.isInitialized
       });
       
+      // Update state immediately to prevent race conditions
       setUser(newUser);
       setSession(newSession);
-      setIsLoading(false);
+      
+      // Always set loading to false when auth service is initialized
+      // This prevents components from showing "sign in" before auth completes
+      if (authService.isInitialized) {
+        console.log('✅ useAuth: Auth service initialized, setting isLoading=false');
+        setIsLoading(false);
+      }
+      
+      // Force immediate re-render for OAuth flows
+      if (newSession && newUser) {
+        console.log('✅ useAuth: Session and user available, forcing immediate update');
+        setIsLoading(false); // Ensure loading is false when we have both session and user
+      }
     });
 
-    // If auth service is already initialized, get current state
+    // If auth service is already initialized, get current state immediately
     if (authService.isInitialized) {
+      console.log('useAuth: Auth service already initialized, getting current state');
       setUser(authService.user);
       setSession(authService.session);
       setIsLoading(false);
+    } else {
+      console.log('useAuth: Auth service not yet initialized, waiting...');
+      // Set a timeout to prevent infinite loading if auth service fails to initialize
+      const initTimeout = setTimeout(() => {
+        if (!authService.isInitialized) {
+          console.warn('⚠️ Auth service initialization timeout, setting loading to false');
+          setIsLoading(false);
+        }
+      }, 5000); // 5 second timeout
+      
+      return () => {
+        clearTimeout(initTimeout);
+        removeListener();
+      };
     }
 
     return removeListener;
@@ -105,9 +138,38 @@ export function useAuth(): UseAuthReturn {
     return await authService.resetPassword(email);
   };
 
+  const updatePassword = async (newPassword: string) => {
+    return await authService.updatePassword(newPassword);
+  };
+
+  const setSessionFromTokens = async (accessToken: string, refreshToken: string) => {
+    setIsLoading(true);
+    try {
+      const result = await authService.setSessionFromTokens(accessToken, refreshToken);
+      return result;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const verifyPasswordResetToken = async (token: string) => {
+    setIsLoading(true);
+    try {
+      const result = await authService.verifyPasswordResetToken(token);
+      return result;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const updateProfile = async (updates: Partial<AuthUser>) => {
-    const result = await authService.updateProfile(updates);
-    return result;
+    setIsLoading(true);
+    try {
+      const result = await authService.updateProfile(updates);
+      return result;
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const validateSession = async () => {
@@ -118,6 +180,10 @@ export function useAuth(): UseAuthReturn {
   const refreshSession = async () => {
     const result = await authService.refreshSession();
     return result;
+  };
+
+  const retryLoadUserProfile = async () => {
+    await authService.retryLoadUserProfile();
   };
 
   return {
@@ -131,8 +197,12 @@ export function useAuth(): UseAuthReturn {
     signInWithFacebook,
     signOut,
     resetPassword,
+    updatePassword,
+    setSessionFromTokens,
+    verifyPasswordResetToken,
     updateProfile,
     validateSession,
     refreshSession,
+    retryLoadUserProfile,
   };
 }

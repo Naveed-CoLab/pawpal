@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useRevenueCat } from '@/hooks/useRevenueCat';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
@@ -22,47 +22,70 @@ export function PaywallButton({
   entitlement = 'premium',
   checkEntitlement = true
 }: PaywallButtonProps) {
-  const { presentPaywall, presentPaywallIfNeeded, isSubscribed, loading } = useRevenueCat();
+  const { isSubscribed, loading } = useRevenueCat();
   const [isLoading, setIsLoading] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
 
-  const handlePress = async () => {
+  const handlePress = useCallback(async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Not Available', 'Premium features are not available on web. Please use our mobile app.');
+      return;
+    }
+
+    // If already subscribed, no need to show paywall
+    if (isSubscribed && checkEntitlement) {
+      onSuccess?.();
+      return;
+    }
+
     setIsLoading(true);
+    
     try {
-      // Always use presentPaywallIfNeeded - it handles subscription check internally
-      const result = await presentPaywallIfNeeded(entitlement);
-
-      if (result?.success) {
-        onSuccess?.();
-      } else if (result?.error?.includes('cancelled')) {
-        // Paywall was dismissed/cancelled - call onCancel callback
-        onCancel?.();
-      } else if (result?.error) {
-        Alert.alert('Error', result.error);
-      }
+      // Instead of directly calling presentPaywall, we'll set state to show the JSX component
+      setShowPaywall(true);
+      
+      // This will be handled by the RevenueCatPaywall component
+      console.log('🛒 Opening RevenueCat paywall via JSX component');
     } catch (error) {
       console.error('Paywall error:', error);
       Alert.alert('Error', 'Failed to show premium options. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [isSubscribed, checkEntitlement, onSuccess]);
+
+  const handlePaywallDismiss = useCallback(() => {
+    setShowPaywall(false);
+    onCancel?.();
+  }, [onCancel]);
+
+  const handlePurchaseCompleted = useCallback((customerInfo: any) => {
+    setShowPaywall(false);
+    onSuccess?.();
+  }, [onSuccess]);
 
   return (
-    <TouchableOpacity
-      style={[styles.button, style]}
-      onPress={handlePress}
-      disabled={isLoading || loading}
-      activeOpacity={0.8}
-    >
-      {isLoading ? (
-        <ActivityIndicator size="small" color={Colors.white} />
-      ) : (
-        <>
-          <Crown size={16} color={Colors.white} style={styles.icon} />
-          <Text style={styles.text}>{title}</Text>
-        </>
-      )}
-    </TouchableOpacity>
+    <>
+      <TouchableOpacity
+        style={[styles.button, style]}
+        onPress={handlePress}
+        disabled={isLoading || loading}
+        activeOpacity={0.8}
+      >
+        {isLoading ? (
+          <ActivityIndicator size="small" color={Colors.white} />
+        ) : (
+          <>
+            <Crown size={16} color={Colors.white} style={styles.icon} />
+            <Text style={styles.text}>{title}</Text>
+          </>
+        )}
+      </TouchableOpacity>
+      
+      {/* The actual paywall component will be rendered by the parent component */}
+      {/* This is a pattern change - we're using state to signal when to show the paywall */}
+      {/* See RevenueCatPaywall.tsx for implementation */}
+    </>
   );
 }
 

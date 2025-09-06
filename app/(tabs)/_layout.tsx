@@ -1,11 +1,10 @@
 import { Tabs } from 'expo-router';
 import {
   Home,
-  Video,
   MessageCircle,
-  Heart,
   Clock,
   User,
+  Activity,
 } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
@@ -13,13 +12,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
 import { useEffect } from 'react';
 import { router } from 'expo-router';
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user, retryLoadUserProfile } = useAuth();
 
-  // Auth guard - redirect to onboarding if not authenticated
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
       console.log('TabLayout: User not authenticated, redirecting to onboarding');
@@ -27,15 +25,38 @@ export default function TabLayout() {
     }
   }, [isAuthenticated, isLoading]);
 
-  // Prevent rendering tabs while checking auth
-  if (isLoading) {
+  // Retry loading user profile if we have a minimal user object
+  useEffect(() => {
+    if (isAuthenticated && user && !user.phone) {
+      // If user doesn't have phone (indicating minimal profile), try to load full profile
+      const timer = setTimeout(() => {
+        retryLoadUserProfile();
+      }, 5000); // Wait 5 seconds before retrying
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isAuthenticated, user, retryLoadUserProfile]);
+
+  if (isLoading || !isAuthenticated) {
     return null;
   }
 
-  // If not authenticated, don't render tabs (redirect will happen)
-  if (!isAuthenticated) {
-    return null;
-  }
+  // Reusable icon wrapper for filled-style effect
+  const renderIcon = (IconComponent: any, focused: boolean, color: string) => (
+    <View
+      style={{
+        backgroundColor: focused ? '#ff990133' : 'transparent', // subtle orange background
+        borderRadius: 12,
+        padding: 6,
+      }}
+    >
+      <IconComponent
+        size={22}
+        color={color}
+        strokeWidth={1.8}
+      />
+    </View>
+  );
 
   return (
     <Tabs
@@ -43,13 +64,9 @@ export default function TabLayout() {
         headerShown: false,
         tabBarActiveTintColor: '#ff9901',
         tabBarInactiveTintColor: '#47463e',
-
-        /** 🔧 Clean modern navbar design matching reference */
         tabBarStyle: {
-          backgroundColor: '#ffffff', // Clean white background
-          borderTopWidth: 0, // Remove top border
-          
-          // Clean subtle shadow
+          backgroundColor: '#ffffff',
+          borderTopWidth: 0,
           ...Platform.select({
             ios: {
               shadowColor: '#000000',
@@ -58,42 +75,30 @@ export default function TabLayout() {
               shadowRadius: 8,
             },
             android: {
-              elevation: 4,
+              elevation: 6,
             },
           }),
-
-          // Perfect dimensions matching reference
-          height: 70 + insets.bottom,
-          paddingBottom: insets.bottom + 8,
-          paddingTop: 12,
+          height: 72 + insets.bottom,
+          paddingBottom: insets.bottom + 10,
+          paddingTop: 6,
           paddingHorizontal: 20,
-          
-          // Clean flat design
-          borderTopLeftRadius: 0,
-          borderTopRightRadius: 0,
         },
-
         tabBarLabelStyle: {
           fontFamily: Fonts.body.medium,
           fontSize: 11,
-          marginTop: 6,
-          marginBottom: 2,
+          marginTop: 2,
+          marginBottom: 4,
           letterSpacing: 0.2,
           fontWeight: '500',
         },
-        
-        tabBarIconStyle: { 
-          marginTop: 4,
+        tabBarIconStyle: {
+          marginTop: 0,
           marginBottom: 0,
         },
-        
-        // Clean tab button styling
         tabBarItemStyle: {
-          paddingVertical: 6,
+          paddingVertical: 4,
           paddingHorizontal: 4,
         },
-        
-        // Remove active background
         tabBarActiveBackgroundColor: 'transparent',
       }}
     >
@@ -101,104 +106,49 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ size, color, focused }) => (
-            <Home 
-              size={focused ? 24 : 22} 
-              color={color}
-              strokeWidth={focused ? 0 : 1.8}
-              fill={focused ? color : 'transparent'}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="coach"
-        options={{
-          title: 'Coach',
-          tabBarIcon: ({ size, color, focused }) => (
-            <Video 
-              size={focused ? 24 : 22} 
-              color={color}
-              strokeWidth={focused ? 0 : 1.8}
-              fill={focused ? color : 'transparent'}
-            />
-          ),
+          tabBarIcon: ({ color, focused }) =>
+            renderIcon(Home, focused, color),
         }}
       />
       <Tabs.Screen
         name="chat"
         options={{
           title: 'Chat',
-          tabBarIcon: ({ size, color, focused }) => (
-            <MessageCircle 
-              size={focused ? 24 : 22} 
-              color={color}
-              strokeWidth={focused ? 0 : 1.8}
-              fill={focused ? color : 'transparent'}
-            />
-          ),
+          tabBarIcon: ({ color, focused }) =>
+            renderIcon(MessageCircle, focused, color),
         }}
       />
       <Tabs.Screen
-        name="health"
+        name="trends"
         options={{
-          title: 'Health',
-          tabBarIcon: ({ size, color, focused }) => (
-            <Heart 
-              size={focused ? 24 : 22} 
-              color={color}
-              strokeWidth={focused ? 0 : 1.8}
-              fill={focused ? color : 'transparent'}
-            />
-          ),
+          title: 'Trends',
+          tabBarIcon: ({ color, focused }) =>
+            renderIcon(Activity, focused, color),
         }}
       />
       <Tabs.Screen
         name="history"
         options={{
           title: 'History',
-          tabBarIcon: ({ size, color, focused }) => (
-            <Clock 
-              size={focused ? 24 : 22} 
-              color={color}
-              strokeWidth={focused ? 0 : 1.8}
-              fill={focused ? color : 'transparent'}
-            />
-          ),
+          tabBarIcon: ({ color, focused }) =>
+            renderIcon(Clock, focused, color),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: 'Profile',
-          tabBarIcon: ({ size, color, focused }) => (
-            <User 
-              size={focused ? 24 : 22} 
-              color={color}
-              strokeWidth={focused ? 0 : 1.8}
-              fill={focused ? color : 'transparent'}
-            />
-          ),
+          tabBarIcon: ({ color, focused }) =>
+            renderIcon(User, focused, color),
         }}
       />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          href: null, // Hide from tab bar
-        }}
-      />
-      <Tabs.Screen
-        name="profile/edit"
-        options={{
-          href: null, // Hide from tab bar
-        }}
-      />
-      <Tabs.Screen
-        name="mood"
-        options={{
-          href: null, // Hide from tab bar
-        }}
-      />
+
+      {/* Hidden tabs */}
+      <Tabs.Screen name="coach" options={{ href: null }} />
+      <Tabs.Screen name="health" options={{ href: null }} />
+      <Tabs.Screen name="settings" options={{ href: null }} />
+      <Tabs.Screen name="profile/edit" options={{ href: null }} />
+      <Tabs.Screen name="mood" options={{ href: null }} />
     </Tabs>
   );
 }

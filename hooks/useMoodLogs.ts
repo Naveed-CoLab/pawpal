@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './useAuth';
 import { MoodAnalysisResult } from '@/lib/moodAnalysisAPI';
+import { Pet } from '@/lib/database';
 
 export interface MoodLog {
   id: string;
@@ -29,7 +30,48 @@ export interface MoodStreak {
   updated_at: string;
 }
 
-export const useMoodLogs = () => {
+// Badge checking functionality
+const checkMoodBadges = async (
+  userId: string, 
+  showSnackbar?: (message: string, type?: string) => void,
+  currentMoodCount?: number
+) => {
+  try {
+    let moodCount = currentMoodCount;
+    
+    // If mood count not provided, fetch it
+    if (moodCount === undefined) {
+      const { data: moodLogs, error } = await supabase
+        .from('mood_logs')
+        .select('id')
+        .eq('user_id', userId);
+
+      if (error) {
+        console.error('❌ Error counting mood logs for badges:', error);
+        return;
+      }
+      moodCount = moodLogs?.length || 0;
+    }
+
+    console.log(`🏅 User has ${moodCount} mood logs, checking for badges...`);
+
+    // Award badges based on milestones
+    if (moodCount === 1) {
+      console.log('🎉 First mood tracking badge earned!');
+      showSnackbar?.('🏅 Badge Earned: Mood Detective! You\'re helping us understand your pet better! (+15 points)', 'success');
+    } else if (moodCount === 5) {
+      console.log('🎉 Emotion expert badge earned!');
+      showSnackbar?.('🏅 Badge Earned: Emotion Expert! You really care about their emotional wellbeing! (+30 points)', 'success');
+    } else if (moodCount === 10) {
+      console.log('🎉 Mood master badge earned!');
+      showSnackbar?.('🏅 Badge Earned: Mood Master! You\'re becoming a pet emotion expert! (+60 points)', 'success');
+    }
+  } catch (error) {
+    console.error('❌ Error checking mood badges:', error);
+  }
+};
+
+export const useMoodLogs = (showSnackbar?: (message: string, type?: string) => void) => {
   const { user } = useAuth();
   const [moodLogs, setMoodLogs] = useState<MoodLog[]>([]);
   const [moodStreaks, setMoodStreaks] = useState<MoodStreak[]>([]);
@@ -57,8 +99,8 @@ export const useMoodLogs = () => {
       
       if (tableError) {
         console.error('❌ mood_logs table error:', tableError);
-        if (tableError.message.includes('relation "mood_logs" does not exist') || 
-            tableError.message.includes('Bad Request')) {
+        if (tableError.message && (tableError.message.includes('relation "mood_logs" does not exist') || 
+            tableError.message.includes('Bad Request'))) {
           console.error('🚨 CRITICAL: mood_logs table does not exist! Migration may not have been applied.');
           setError('Database migration needed. Please apply the migration script.');
           return { needsMigration: true };
@@ -73,11 +115,13 @@ export const useMoodLogs = () => {
   };
 
   // Fetch mood logs for current user
-  const fetchMoodLogs = async (petId?: string) => {
+  const fetchMoodLogs = useCallback(async (petId?: string) => {
     console.log('📖 fetchMoodLogs called:', { userId: user?.id, petId });
     
     if (!user?.id) {
       console.warn('❌ No user ID, skipping fetch');
+      setMoodLogs([]);
+      setLoading(false);
       return;
     }
 
@@ -101,8 +145,8 @@ export const useMoodLogs = () => {
       console.log('📋 Mood logs query result:', { data, error, count: data?.length });
 
       if (error) {
-        if (error.message.includes('relation "mood_logs" does not exist') || 
-            error.message.includes('Bad Request')) {
+        if (error.message && (error.message.includes('relation "mood_logs" does not exist') || 
+            error.message.includes('Bad Request'))) {
           console.warn('⚠️ mood_logs table not found - migration needed');
           setError('Database migration needed. Please apply the migration script.');
           setMoodLogs([]);
@@ -115,10 +159,11 @@ export const useMoodLogs = () => {
     } catch (err) {
       console.error('❌ Error fetching mood logs:', err);
       setError(err instanceof Error ? err.message : 'Failed to fetch mood logs');
+      setMoodLogs([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id]);
 
   // Fetch mood streaks for current user
   const fetchMoodStreaks = async (petId?: string) => {
@@ -145,7 +190,7 @@ export const useMoodLogs = () => {
   };
 
   // Save a new mood log
-  const saveMoodLog = async (
+  const saveMoodLog = useCallback(async (
     petId: string,
     moodResult: MoodAnalysisResult,
     context?: string,
@@ -188,8 +233,8 @@ export const useMoodLogs = () => {
       console.log('📋 Database response:', { data: moodLogData, error: moodLogError });
 
       if (moodLogError) {
-        if (moodLogError.message.includes('relation "mood_logs" does not exist') || 
-            moodLogError.message.includes('Bad Request')) {
+        if (moodLogError.message && (moodLogError.message.includes('relation "mood_logs" does not exist') || 
+            moodLogError.message.includes('Bad Request'))) {
           throw new Error('Database migration needed. Please apply the migration script first.');
         }
         throw moodLogError;
@@ -214,6 +259,10 @@ export const useMoodLogs = () => {
         fetchMoodStreaks()
       ]);
 
+      // Check for mood tracking badges
+      const newMoodCount = moodLogs.length + 1;
+      await checkMoodBadges(user.id, showSnackbar, newMoodCount);
+
       return moodLogData;
     } catch (err) {
       console.error('Error saving mood log:', err);
@@ -222,7 +271,7 @@ export const useMoodLogs = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user?.id, moodLogs.length, showSnackbar]);
 
   // Delete a mood log
   const deleteMoodLog = async (moodLogId: string): Promise<boolean> => {

@@ -19,6 +19,7 @@ import { useRevenueCat } from '@/hooks/useRevenueCat';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { Snackbar } from '@/components/ui/Snackbar';
+import { EngagingLoader } from '@/components/ui/EngagingLoader';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { ArrowLeft, Camera, Crown, Mail, User, Phone } from 'lucide-react-native';
@@ -90,6 +91,8 @@ export default function EditProfileScreen() {
   const handleSave = async () => {
     if (!validateForm()) return;
 
+    if (isSaving) return; // Prevent multiple submissions
+
     setIsSaving(true);
     showSnackbar('Updating your profile...', 'info');
     
@@ -109,26 +112,46 @@ export default function EditProfileScreen() {
         updates.avatar_url = newAvatar;
       }
 
-      console.log('Updating profile with:', updates);
+      console.log('🔄 Updating profile with:', updates);
+      console.log('🔄 Current user:', user?.email);
 
       // Update profile
       const { data, error } = await updateProfile(updates);
 
+      console.log('📤 Profile update result:', { data: !!data, error });
+
       if (error) {
-        console.error('Profile update error:', error);
+        console.error('❌ Profile update error:', error);
         showSnackbar(`Update failed: ${error}`, 'error');
-      } else {
-        console.log('Profile updated successfully:', data);
-        showSnackbar('Profile updated successfully!', 'success');
+      } else if (data) {
+        console.log('✅ Profile updated successfully:', data.email);
+        
+        // Update local form data to reflect changes
+        setFormData(prev => ({
+          ...prev,
+          full_name: data.full_name || prev.full_name,
+          phone: data.phone || prev.phone,
+          avatar_url: newAvatar || data.avatar_url || prev.avatar_url,
+        }));
+        
+        // Clear the new avatar since it's now saved
+        if (newAvatar) {
+          setNewAvatar(null);
+        }
+        
+        showSnackbar('Profile updated successfully! 🎉', 'success');
         
         // Navigate back after a short delay
         setTimeout(() => {
           router.back();
         }, 1500);
+      } else {
+        console.warn('⚠️ Profile update returned no data');
+        showSnackbar('Update completed but no data returned. Please refresh.', 'error');
       }
     } catch (error: any) {
-      console.error('Unexpected error updating profile:', error);
-      showSnackbar('An unexpected error occurred', 'error');
+      console.error('💥 Unexpected error updating profile:', error);
+      showSnackbar(`An unexpected error occurred: ${error.message}`, 'error');
     } finally {
       setIsSaving(false);
     }
@@ -208,7 +231,7 @@ export default function EditProfileScreen() {
 
   return (
     <LinearGradient
-      colors={Colors.backgroundGradient}
+      colors={Colors.backgroundGradient as unknown as readonly [string, string, ...string[]]}
       style={styles.container}
     >
       <View style={styles.header}>
@@ -352,6 +375,15 @@ export default function EditProfileScreen() {
           />
         </View>
       </ScrollView>
+
+      {/* Engaging Loader for Profile Updates */}
+      {isSaving && (
+        <EngagingLoader 
+          type="profile" 
+          showTip={true}
+          showAnimation={true}
+        />
+      )}
 
       <Snackbar
         message={snackbar.message}

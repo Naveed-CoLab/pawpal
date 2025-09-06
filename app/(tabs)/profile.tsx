@@ -6,7 +6,9 @@ import {
   ScrollView,
   TouchableOpacity,
   Image,
+  Dimensions,
   Alert,
+  ActivityIndicator,
   FlatList,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
@@ -20,17 +22,54 @@ import { PetCard } from '@/components/ui/PetCard';
 import { NotificationModal } from '@/components/ui/NotificationModal';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
-import { LogOut, Crown, Star, CreditCard as Edit2, User, Heart, Bell, Settings } from 'lucide-react-native';
+import { 
+  Settings, 
+  Edit3, 
+  Crown, 
+  Trophy, 
+  Plus, 
+  ChevronRight, 
+  Bell, 
+  Star,
+  Target,
+  TrendingUp,
+  Heart,
+  Camera,
+  User,
+  LogOut
+} from 'lucide-react-native';
+import { Card } from '@/components/ui/Card';
+
+// Default badge data for when user badges are loading or empty
+const defaultBadges = [
+  {
+    title: 'First Chat',
+    image: require('@/assets/images/Image (13).png'),
+    icon: '💬',
+    points: 10,
+  },
+  {
+    title: 'Chat Enthusiast',
+    image: require('@/assets/images/Image (16).png'),
+    icon: '🗨️',
+    points: 25,
+  },
+  {
+    title: 'Chat Master',
+    image: require('@/assets/images/Image (17).png'),
+    icon: '👑',
+    points: 50,
+  },
+];
 
 export default function ProfileScreen() {
   const { user, signOut, isLoading } = useAuth();
   const { badges, loading: badgesLoading } = useUserBadges();
-  const { isSubscribed, currentSubscription, loading: subscriptionLoading } = useRevenueCat();
-  const { debugInfo } = useSubscriptionStatus();
+  const { isSubscribed, currentSubscription, loading: subscriptionLoading, presentPaywallIfNeeded } = useRevenueCat();
+  // Removed unused debugInfo to prevent text rendering issues
   const { pets, loading: petsLoading, deletePet, refetch } = usePets();
   const [signingOut, setSigningOut] = useState(false);
   const [activeTab, setActiveTab] = useState<'user' | 'pets'>('user');
-  const [showNotificationModal, setShowNotificationModal] = useState(false);
 
   // Debug auth state
   useEffect(() => {
@@ -80,10 +119,7 @@ export default function ProfileScreen() {
   };
 
   const handleMenuPress = (item: string) => {
-    console.log('Profile: handleMenuPress called with:', item, { signingOut, isLoading });
-    
     if (signingOut || isLoading) {
-      console.log('Profile: Menu press blocked by loading state');
       return;
     }
     
@@ -92,14 +128,17 @@ export default function ProfileScreen() {
         router.push('/(tabs)/profile/edit');
         break;
       case 'notifications':
-        setShowNotificationModal(true);
+        Alert.alert(
+          'Notification Preferences',
+          'Notification settings will be available in a future update!',
+          [{ text: 'OK' }]
+        );
         break;
       case 'subscription':
         // Always call presentPaywallIfNeeded - it will handle the subscription check internally
         handleShowPaywall();
         break;
       case 'logout':
-        console.log('Profile: Calling handleSignOut');
         handleSignOut();
         break;
       default:
@@ -109,11 +148,9 @@ export default function ProfileScreen() {
   };
 
   const handleShowPaywall = async () => {
-    const { presentPaywallIfNeeded } = useRevenueCat();
-    
     try {
-      // Use presentPaywallIfNeeded with 'premium' entitlement to match subscription status hook
-      const result = await presentPaywallIfNeeded('premium');
+      // Use presentPaywallIfNeeded without arguments - it will check subscription status internally
+      const result = await presentPaywallIfNeeded();
       
       if (result?.success) {
         Alert.alert(
@@ -140,10 +177,10 @@ export default function ProfileScreen() {
   };
 
   const handleEditPet = (pet: any) => {
-    router.push(`/pets/edit?id=${pet.id}`);
+    router.push(`/pets/edit?id=${pet.id}` as any);
   };
 
-  const handleDeletePet = (pet: any) => {
+  const handleDeletePet = async (pet: any) => {
     Alert.alert(
       'Delete Pet',
       `Are you sure you want to remove ${pet.name} from your pets?`,
@@ -153,8 +190,10 @@ export default function ProfileScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            const { error } = await deletePet(pet.id);
-            if (error) {
+            try {
+              await deletePet(pet.id);
+            } catch (error) {
+              console.error('Error deleting pet:', error);
               Alert.alert('Error', 'Failed to delete pet. Please try again.');
             }
           },
@@ -164,20 +203,63 @@ export default function ProfileScreen() {
   };
 
   const handlePetPress = (pet: any) => {
-    router.push(`/pets/details?id=${pet.id}`);
+    // For now, redirect to edit since we don't have a details page
+    router.push(`/pets/edit?id=${pet.id}` as any);
   };
 
   const handleAddPet = () => {
     router.push('/pets/add');
   };
 
-  // Get user badges for display
-  const userBadgesList = badges.slice(0, 3); // Show first 3 badges
-  const defaultBadges = [
-    { title: 'Pet Lover', image: require('@/assets/images/lover.png') },
-    { title: 'Healthy Pup', image: require('@/assets/images/healthy-pup.png') },
-    { title: 'Training Champ', image: require('@/assets/images/training-champ.png') },
-  ];
+  // Calculate total achievement points
+  const totalPoints = badges.reduce((sum, userBadge) => {
+    // Estimate points based on badge type (since we don't have points field yet)
+    const estimatedPoints = (userBadge?.badge?.title || '').includes('First') ? 10 : 
+                           (userBadge?.badge?.title || '').includes('Master') ? 50 : 25;
+    return sum + estimatedPoints;
+  }, 0);
+
+  const userLevel = Math.floor(totalPoints / 50) + 1;
+
+  // Create user badges list for mapping
+  const userBadgesList = badges || [];
+
+  // Enhanced badge data with user achievements
+  const enhancedBadges = defaultBadges.map((badge: any, index: number) => {
+    const userBadge = userBadgesList[index];
+    return {
+      title: userBadge?.badge?.title || badge.title,
+      image: userBadge?.badge?.image_url ? { uri: userBadge.badge.image_url } : badge.image,
+      icon: userBadge?.badge?.icon || badge.icon,
+      points: userBadge?.badge?.points || badge.points,
+      earned: !!userBadge,
+      earnedAt: userBadge?.earned_at
+    };
+  });
+
+  // Get engagement stats
+  const getEngagementStats = () => {
+    return {
+      totalBadges: badges.length,
+      totalPoints,
+      nextMilestone: getNextMilestone(),
+      level: Math.floor(totalPoints / 100) + 1,
+    };
+  };
+
+  // Get next milestone
+  const getNextMilestone = () => {
+    const milestones = [
+      { points: 50, title: 'Getting Started' },
+      { points: 100, title: 'Engaged User' },
+      { points: 250, title: 'Pet Expert' },
+      { points: 500, title: 'VetPaw Champion' },
+    ];
+    
+    return milestones.find(milestone => totalPoints < milestone.points) || { points: 1000, title: 'Master' };
+  };
+
+  const stats = getEngagementStats();
 
   return (
     <View style={styles.container}>
@@ -218,7 +300,7 @@ export default function ProfileScreen() {
               onPress={() => handleMenuPress('edit-profile')}
               disabled={isLoading || signingOut}
             >
-              <Edit2 size={16} color={Colors.white} />
+              <Edit3 size={16} color={Colors.white} />
             </TouchableOpacity>
           </View>
           
@@ -276,101 +358,109 @@ export default function ProfileScreen() {
         {/* Tab Content */}
         {activeTab === 'user' ? (
           <>
-            {/* Stats Badges Container */}
-            <View style={styles.statsContainer}>
-          {defaultBadges.map((badge, index) => {
-            const userBadge = userBadgesList[index];
-            return (
-              <View key={index} style={styles.statCard}>
-                <Image
-                  source={userBadge?.badge?.image_url ? { uri: userBadge.badge.image_url } : badge.image}
-                  style={styles.statIcon}
-                  resizeMode="contain"
-                />
-                <Text style={styles.statText}>
-                  {userBadge?.badge?.title || badge.title}
-                </Text>
+            {/* Engagement Stats Card */}
+            <Card variant="elevated" style={styles.engagementStatsCard}>
+              <Text style={styles.engagementStatsTitle}>Your VetPaw Journey</Text>
+              <View style={styles.statsRow}>
+                <View style={styles.statItemDetail}>
+                  <Text style={styles.statValueDetail}>{stats.totalBadges}</Text>
+                  <Text style={styles.statLabelDetail}>Badges Earned</Text>
+                </View>
+                <View style={styles.statDividerDetail} />
+                <View style={styles.statItemDetail}>
+                  <Text style={styles.statValueDetail}>{stats.totalPoints}</Text>
+                  <Text style={styles.statLabelDetail}>Total Points</Text>
+                </View>
+                <View style={styles.statDividerDetail} />
+                <View style={styles.statItemDetail}>
+                  <Text style={styles.statValueDetail}>Level {stats.level}</Text>
+                  <Text style={styles.statLabelDetail}>Current Level</Text>
+                </View>
               </View>
-            );
-          })}
-        </View>
-
-        {/* Menu Container with Separators */}
-        <View style={styles.menuContainer}>
-          <TouchableOpacity
-            style={[
-              styles.menuItem,
-              (isLoading || signingOut) && styles.menuItemDisabled
-            ]}
-            onPress={() => handleMenuPress('edit-profile')}
-            disabled={isLoading || signingOut}
-          >
-            <View style={styles.menuIconContainer}>
-              <User size={20} color="#47463e" fill="#47463e" />
-            </View>
-            <Text style={styles.menuText}>Edit Profile</Text>
-          </TouchableOpacity>
-          
-          <View style={styles.separator} />
-
-          <TouchableOpacity
-            style={[
-              styles.menuItem,
-              (isLoading || signingOut) && styles.menuItemDisabled
-            ]}
-            onPress={() => handleMenuPress('notifications')}
-            disabled={isLoading || signingOut}
-          >
-            <View style={styles.menuIconContainer}>
-              <Bell size={20} color="#47463e" fill="#47463e" />
-            </View>
-            <Text style={styles.menuText}>Notification Preferences</Text>
-          </TouchableOpacity>
-          
-          <View style={styles.separator} />
-
-          <TouchableOpacity
-            style={[
-              styles.menuItem,
-              (isLoading || signingOut) && styles.menuItemDisabled
-            ]}
-            onPress={() => handleMenuPress('subscription')}
-            disabled={isLoading || signingOut}
-          >
-            <View style={styles.subscriptionMenuItem}>
-              <View style={styles.menuIconContainer}>
-                <Crown size={20} color="#47463e" fill="#47463e" />
+              <View style={styles.milestoneContainer}>
+                <Text style={styles.milestoneText}>Next Milestone: {stats.nextMilestone.title} ({stats.nextMilestone.points} points)</Text>
+                <View style={styles.progressBar}>
+                  <View style={[styles.progressFill, { width: `${(stats.totalPoints / stats.nextMilestone.points) * 100}%` }]} />
+                </View>
               </View>
-              <View style={styles.subscriptionMenuContent}>
-                <Text style={styles.menuText}>Subscription</Text>
-                {isSubscribed && (
-                  <View style={styles.activeSubscriptionBadge}>
-                    <Crown size={12} color={Colors.white} />
-                    <Text style={styles.activeSubscriptionText}>Premium</Text>
+            </Card>
+
+            {/* Menu Container with Separators */}
+            <View style={styles.menuContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.menuItem,
+                  (isLoading || signingOut) && styles.menuItemDisabled
+                ]}
+                onPress={() => handleMenuPress('edit-profile')}
+                disabled={isLoading || signingOut}
+              >
+                <View style={styles.menuIconContainer}>
+                  <User size={20} color="#47463e" fill="#47463e" />
+                </View>
+                <Text style={styles.menuText}>Edit Profile</Text>
+              </TouchableOpacity>
+              
+              <View style={styles.separator} />
+
+              <TouchableOpacity
+                style={[
+                  styles.menuItem,
+                  (isLoading || signingOut) && styles.menuItemDisabled
+                ]}
+                onPress={() => handleMenuPress('notifications')}
+                disabled={isLoading || signingOut}
+              >
+                <View style={styles.menuIconContainer}>
+                  <Bell size={20} color="#47463e" fill="#47463e" />
+                </View>
+                <Text style={styles.menuText}>Notification Preferences</Text>
+              </TouchableOpacity>
+              
+              <View style={styles.separator} />
+
+              <TouchableOpacity
+                style={[
+                  styles.menuItem,
+                  (isLoading || signingOut) && styles.menuItemDisabled
+                ]}
+                onPress={() => handleMenuPress('subscription')}
+                disabled={isLoading || signingOut}
+              >
+                <View style={styles.subscriptionMenuItem}>
+                  <View style={styles.menuIconContainer}>
+                    <Crown size={20} color="#47463e" fill="#47463e" />
                   </View>
-                )}
-              </View>
-            </View>
-          </TouchableOpacity>
-          
-          <View style={styles.separator} />
+                  <View style={styles.subscriptionMenuContent}>
+                    <Text style={styles.menuText}>Subscription</Text>
+                    {isSubscribed && (
+                      <View style={styles.activeSubscriptionBadge}>
+                        <Crown size={12} color={Colors.white} />
+                        <Text style={styles.activeSubscriptionText}>Premium</Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              </TouchableOpacity>
+              
+              <View style={styles.separator} />
 
-          <TouchableOpacity
-            style={[
-              styles.menuItem,
-              (isLoading || signingOut) && styles.menuItemDisabled
-            ]}
-            onPress={() => handleMenuPress('logout')}
-            disabled={isLoading || signingOut}
-          >
-            <View style={styles.menuIconContainer}>
-              <LogOut size={20} color="#47463e" fill="#47463e" />
+              <TouchableOpacity
+                style={[
+                  styles.menuItem,
+                  (isLoading || signingOut) && styles.menuItemDisabled
+                ]}
+                onPress={() => handleMenuPress('logout')}
+                disabled={isLoading || signingOut}
+              >
+                <View style={styles.menuIconContainer}>
+                  <LogOut size={20} color="#47463e" fill="#47463e" />
+                </View>
+                <Text style={[styles.menuText, { color: Colors.error }]}>
+                  {signingOut ? 'Logging out...' : 'Logout'}
+                </Text>
+              </TouchableOpacity>
             </View>
-            <Text style={[styles.menuText, { color: Colors.error }]}>
-              {signingOut ? 'Logging out...' : 'Logout'}
-            </Text>
-          </TouchableOpacity>
-        </View>
 
             {/* User Stats Section */}
             {badges.length > 0 && (
@@ -379,11 +469,15 @@ export default function ProfileScreen() {
                 <View style={styles.badgesGrid}>
                   {badges.map((userBadge, index) => (
                     <View key={index} style={styles.badgeItem}>
-                      <Image
-                        source={{ uri: userBadge.badge.image_url }}
-                        style={styles.badgeIcon}
-                        resizeMode="contain"
-                      />
+                      {userBadge.badge.icon ? (
+                        <Text style={styles.badgeIconEmoji}>{userBadge.badge.icon}</Text>
+                      ) : (
+                        <Image
+                          source={{ uri: userBadge.badge.image_url }}
+                          style={styles.badgeIcon}
+                          resizeMode="contain"
+                        />
+                      )}
                       <Text style={styles.badgeTitle}>{userBadge.badge.title}</Text>
                       <Text style={styles.badgeDate}>
                         {new Date(userBadge.earned_at).toLocaleDateString()}
@@ -437,30 +531,7 @@ export default function ProfileScreen() {
             )}
           </View>
         )}
-
-        {/* Debug Info Section (Development Only) */}
-        {__DEV__ && (
-          <View style={styles.debugSection}>
-            <Text style={styles.debugTitle}>🔧 RevenueCat Debug Info</Text>
-            <Text style={styles.debugText}>Status: {debugInfo}</Text>
-            <Text style={styles.debugText}>Loading: {subscriptionLoading ? 'Yes' : 'No'}</Text>
-            <Text style={styles.debugText}>
-              Subscription: {isSubscribed ? '✅ Active' : '❌ Inactive'}
-            </Text>
-            {currentSubscription && (
-              <Text style={styles.debugText}>
-                Product: {currentSubscription.productIdentifier}
-              </Text>
-            )}
-          </View>
-        )}
       </ScrollView>
-
-      {/* Notification Modal */}
-      <NotificationModal
-        visible={showNotificationModal}
-        onClose={() => setShowNotificationModal(false)}
-      />
     </View>
   );
 }
@@ -617,40 +688,6 @@ const styles = StyleSheet.create({
     color: Colors.white,
     marginLeft: 6,
   },
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: 24,
-    paddingVertical: 32,
-    gap: 12,
-  },
-  statCard: {
-    alignItems: 'center',
-    flex: 1,
-    paddingVertical: 16,
-    paddingHorizontal: 8,
-    borderWidth: 2,
-    borderColor: '#ff9d00', // Primary orange border for warmth
-    borderRadius: 16, // Slightly more rounded
-    backgroundColor: Colors.placeholderbg, // Warm peachy background
-    shadowColor: Colors.text,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  statIcon: {
-    width: 32,
-    height: 32,
-    marginBottom: 8,
-  },
-  statText: {
-    fontSize: 12,
-    fontFamily: Fonts.body.bold,
-    color: '#544c3a',
-    textAlign: 'center',
-    lineHeight: 16,
-  },
   menuContainer: {
     marginHorizontal: 24,
     backgroundColor: '#ffffff', // Clean white background like reference
@@ -750,12 +787,30 @@ const styles = StyleSheet.create({
     height: 40,
     marginBottom: 8,
   },
+  badgeIconEmoji: {
+    fontSize: 48,
+    marginBottom: 8,
+  },
   badgeTitle: {
     fontSize: 12,
     fontFamily: Fonts.body.bold,
     color: '#544c3a',
     textAlign: 'center',
     marginBottom: 4,
+  },
+  badgeDescription: {
+    fontSize: 12,
+    fontFamily: Fonts.body.regular,
+    color: Colors.disabled,
+    textAlign: 'center',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  badgePoints: {
+    fontSize: 14,
+    fontFamily: Fonts.body.bold,
+    color: Colors.primary,
+    marginBottom: 8,
   },
   badgeDate: {
     fontSize: 10,
@@ -891,25 +946,73 @@ const styles = StyleSheet.create({
   petsList: {
     gap: 12,
   },
-  // Debug section styles (Development only)
-  debugSection: {
-    margin: 16,
-    padding: 16,
-    backgroundColor: '#FFE0B2',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ff9d00',
+
+  engagementStatsCard: {
+    marginHorizontal: 24,
+    marginBottom: 24,
+    padding: 20,
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    shadowColor: Colors.text,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
   },
-  debugTitle: {
+  engagementStatsTitle: {
+    fontSize: 20,
+    fontFamily: Fonts.heading.bold,
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 20,
+  },
+  statItemDetail: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statValueDetail: {
+    fontSize: 24,
+    fontFamily: Fonts.heading.bold,
+    color: Colors.primary,
+    marginBottom: 4,
+  },
+  statLabelDetail: {
+    fontSize: 12,
+    fontFamily: Fonts.body.medium,
+    color: Colors.disabled,
+    textAlign: 'center',
+  },
+  statDividerDetail: {
+    width: 1,
+    height: '80%',
+    backgroundColor: Colors.border,
+    alignSelf: 'center',
+  },
+  milestoneContainer: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  milestoneText: {
     fontSize: 14,
-    fontFamily: Fonts.body.bold,
-    color: '#E65100',
+    fontFamily: Fonts.body.medium,
+    color: Colors.text,
     marginBottom: 8,
   },
-  debugText: {
-    fontSize: 12,
-    fontFamily: Fonts.body.regular,
-    color: '#E65100',
-    marginBottom: 4,
+  progressBar: {
+    width: '100%',
+    height: 10,
+    backgroundColor: Colors.secondary,
+    borderRadius: 5,
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    backgroundColor: Colors.primary,
+    borderRadius: 5,
   },
 });

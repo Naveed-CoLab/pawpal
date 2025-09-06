@@ -32,9 +32,15 @@ export interface ChatMessage {
 
 export interface Badge {
   id: string;
+  name: string;
   title: string;
-  description: string;
-  image_url: string;
+  description?: string;
+  icon?: string;
+  category?: string;
+  points?: number;
+  image_url?: string;
+  requirement_type?: string;
+  requirement_value?: number;
   created_at: string;
 }
 
@@ -74,14 +80,25 @@ export interface SymptomAssessment {
 // Coaching-related types
 export interface CoachingSession {
   id: string;
-  user_id: string;
-  start_time: string;
-  end_time?: string;
-  transcript?: any;
-  summary?: any;
-  status?: string;
+  conversation_id: string;
+  user_id?: string;
+  transcript: string;
+  summary?: string;
+  session_title: string;
+  main_topic: string;
+  urgency_level: 'low' | 'moderate' | 'high';
+  key_points: string[];
+  recommendations: string[];
+  techniques_taught: string[];
+  next_steps: string[];
+  progress_notes: string;
+  follow_up_timeline: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  duration_seconds: number;
+  raw_conversation_data?: any;
+  raw_captions?: any;
   created_at: string;
-  updated_at: string;
+  updated_at?: string;
 }
 
 export interface CoachingMessage {
@@ -362,11 +379,11 @@ class DatabaseService {
     }
   }
 
-  // Coaching Operations - Fixed: Removed generic query method and added specific methods
+  // Coaching Operations - Updated to use ai_coaching_sessions table
   async getCoachingSessions(userId: string): Promise<{ data: CoachingSession[] | null; error: string | null }> {
     try {
       const { data, error } = await supabase
-        .from('coaching_sessions')
+        .from('ai_coaching_sessions')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false });
@@ -381,7 +398,7 @@ class DatabaseService {
   async createCoachingSession(session: Omit<CoachingSession, 'id' | 'created_at' | 'updated_at'>): Promise<{ data: CoachingSession | null; error: string | null }> {
     try {
       const { data, error } = await supabase
-        .from('coaching_sessions')
+        .from('ai_coaching_sessions')
         .insert(session)
         .select()
         .single();
@@ -396,7 +413,7 @@ class DatabaseService {
   async updateCoachingSession(sessionId: string, updates: Partial<CoachingSession>): Promise<{ data: CoachingSession | null; error: string | null }> {
     try {
       const { data, error } = await supabase
-        .from('coaching_sessions')
+        .from('ai_coaching_sessions')
         .update(updates)
         .eq('id', sessionId)
         .select()

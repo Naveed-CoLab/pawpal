@@ -1,14 +1,15 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Card } from '@/components/ui/Card';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { useSymptomAssessments, useChats } from '@/hooks/useDatabase';
-import { Heart, TriangleAlert, Clock, CircleCheck as CheckCircle, Calendar, Video, MessageCircle } from 'lucide-react-native';
+import { Heart, TriangleAlert, Clock, CircleCheck as CheckCircle, Calendar, MessageCircle } from 'lucide-react-native';
 
-type HistoryItemType = 'assessment' | 'coaching' | 'chat';
+type HistoryItemType = 'assessment' | 'chat';
 
 interface HistoryItem {
   id: string;
@@ -60,8 +61,6 @@ export default function HistoryScreen() {
 
   const getTypeIcon = useCallback((type: HistoryItemType) => {
     switch (type) {
-      case 'coaching':
-        return <Video size={20} color={Colors.primary} />;
       case 'chat':
         return <MessageCircle size={20} color={Colors.primary} />;
       case 'assessment':
@@ -88,19 +87,14 @@ export default function HistoryScreen() {
       });
     });
 
-    // Add chats (both regular and coaching)
+    // Add chats (only regular chats, coaching is handled on coach screen)
     chats.forEach(chat => {
-      // Determine if this is a coaching session based on title or other indicators
-      const isCoaching = chat.title.toLowerCase().includes('coaching') || 
-                        chat.title.toLowerCase().includes('coach') ||
-                        chat.title.toLowerCase().includes('james');
-      
       items.push({
         id: chat.id,
-        type: isCoaching ? 'coaching' : 'chat',
+        type: 'chat',
         title: chat.title,
         date: chat.updated_at,
-        summary: isCoaching ? 'Live coaching session with James' : 'AI chat conversation',
+        summary: 'AI chat conversation',
         data: chat,
       });
     });
@@ -116,40 +110,26 @@ export default function HistoryScreen() {
       : allHistoryItems.filter(item => item.type === selectedFilter);
   }, [allHistoryItems, selectedFilter]);
 
-  const navigateToDetail = useCallback((item: HistoryItem) => {
+  const navigateToDetail = useCallback(async (item: HistoryItem) => {
     try {
       switch (item.type) {
         case 'assessment':
           router.push(`/assessment/${item.id}`);
           break;
-        case 'coaching':
-          // For now, show an alert - in the future, you could create a coaching detail view
-          Alert.alert(
-            'Coaching Session',
-            `Session: ${item.title}\nDate: ${formatDate(item.date)}\n\nCoaching session details and replay will be available soon!`,
-            [{ text: 'OK' }]
-          );
-          break;
         case 'chat':
-          // For now, show an alert - in the future, you could create a chat detail view
-          Alert.alert(
-            'Chat Session',
-            `Chat: ${item.title}\nDate: ${formatDate(item.date)}\n\nChat history details will be available soon!`,
-            [{ text: 'OK' }]
-          );
+          // Store the chat ID that should be opened
+          await AsyncStorage.setItem('pendingChatId', item.id);
+          console.log('📱 Stored pending chat ID:', item.id);
+          // Navigate to chat screen - the chat screen will check for pending chat ID
+          router.push('/(tabs)/chat');
           break;
         default:
-          Alert.alert('Coming Soon', 'Detailed view for this item is coming soon!');
+          console.warn('Unknown history item type:', item.type);
       }
     } catch (error) {
       console.error('Navigation error:', error);
-      Alert.alert(
-        'Navigation Error',
-        'Unable to open details. Please try again.',
-        [{ text: 'OK' }]
-      );
     }
-  }, [formatDate]);
+  }, []);
 
   const renderFilterButton = useCallback((filter: 'all' | HistoryItemType, label: string, icon?: React.ReactNode) => (
     <TouchableOpacity
@@ -236,7 +216,7 @@ export default function HistoryScreen() {
         <Heart size={32} color={Colors.primary} />
         <Text style={styles.headerTitle}>History</Text>
         <Text style={styles.headerSubtitle}>
-          Your health assessments and coaching sessions
+          Your health assessments and chat conversations
         </Text>
       </View>
 
@@ -244,7 +224,6 @@ export default function HistoryScreen() {
       <View style={styles.filtersContainer}>
         {renderFilterButton('all', 'All')}
         {renderFilterButton('assessment', 'Health', <Heart size={16} color={selectedFilter === 'assessment' ? Colors.white : Colors.primary} />)}
-        {renderFilterButton('coaching', 'Coaching', <Video size={16} color={selectedFilter === 'coaching' ? Colors.white : Colors.primary} />)}
         {renderFilterButton('chat', 'Chat', <MessageCircle size={16} color={selectedFilter === 'chat' ? Colors.white : Colors.primary} />)}
       </View>
 

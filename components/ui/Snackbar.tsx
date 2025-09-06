@@ -16,6 +16,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
+import { Wifi, WifiOff, RefreshCw, AlertTriangle, CheckCircle, Info } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -94,43 +95,61 @@ export function Snackbar({
       case 'error':
         return 'Oops! 🐕';
       case 'warning':
-        return 'Warning! ⚠️';
+        return 'Hold on! ⚠️';
       case 'network':
-        return 'Connection Issue 📡';
+        return 'Connection Lost 📡';
       case 'database':
-        return 'Data Sync Issue 💾';
+        return 'Sync Issue 💾';
       case 'permission':
         return 'Permission Needed 🔐';
       case 'info':
-        return 'Info 🐾';
+        return 'Hey there! 🐾';
       default:
         return 'VetPaw 🐕';
     }
   };
 
-  const getBackgroundColor = () => {
-    // Primary VetPaw yellow background for all types
-    const baseYellow = '#FFF9E6'; // Light yellow background
-    
+  const getBackgroundColors = () => {
     switch (type) {
       case 'success':
-        return '#F0F8E6'; // Very light green-yellow
+        return ['#fff8e1', '#f4f7f0']; // Cream to light green
       case 'error':
-        return '#FFF0E6'; // Very light orange-yellow  
+        return ['#fff8e1', '#fff0f0']; // Cream to light red
       case 'warning':
-        return '#FFFAE6'; // Slightly more yellow
+        return ['#fff8e1', '#fffaf0']; // Cream to light orange
       case 'network':
+        return ['#fff8e1', '#f0f8ff']; // Cream to light blue
       case 'database':
+        return ['#fff8e1', '#f8f0ff']; // Cream to light purple
       case 'permission':
-        return '#FFF6E6'; // Light warm yellow
+        return ['#fff8e1', '#fff8f0']; // Cream to light pink
       case 'info':
       default:
-        return baseYellow; // Default VetPaw yellow
+        return ['#fff8e1', '#ffecb3']; // Default VetPaw cream gradient
     }
   };
 
-  const getTitleColor = () => {
-    return '#8B4513'; // VetPaw brown for all titles
+  const getIcon = () => {
+    const iconSize = 24;
+    const iconColor = '#47463e';
+    
+    switch (type) {
+      case 'success':
+        return <CheckCircle size={iconSize} color="#4CAF50" />;
+      case 'error':
+        return <AlertTriangle size={iconSize} color="#ff6b6b" />;
+      case 'warning':
+        return <AlertTriangle size={iconSize} color="#ff9800" />;
+      case 'network':
+        return <WifiOff size={iconSize} color="#2196F3" />;
+      case 'database':
+        return <RefreshCw size={iconSize} color="#9C27B0" />;
+      case 'permission':
+        return <AlertTriangle size={iconSize} color="#FF5722" />;
+      case 'info':
+      default:
+        return <Info size={iconSize} color="#ff9d00" />;
+    }
   };
 
   const getBorderColor = () => {
@@ -138,9 +157,9 @@ export function Snackbar({
       case 'success':
         return '#4CAF50';
       case 'error':
-        return '#FF6B6B';
+        return '#ff6b6b';
       case 'warning':
-        return '#FF9800';
+        return '#ff9800';
       case 'network':
         return '#2196F3';
       case 'database':
@@ -149,31 +168,27 @@ export function Snackbar({
         return '#FF5722';
       case 'info':
       default:
-        return '#FFA726'; // VetPaw orange border
+        return '#ff9d00'; // VetPaw orange border
     }
   };
 
-  const getDogImage = () => {
-    // Always use dog-related icons for VetPaw theme
+  const getActionButtonColor = () => {
     switch (type) {
-      case 'success':
-        return require('@/assets/images/success.png');
-      case 'error':
-        return require('@/assets/images/error_image.png');
-      case 'warning':
-        return require('@/assets/images/dog_avatar.png');
       case 'network':
+        return '#2196F3';
+      case 'success':
+        return '#4CAF50';
+      case 'error':
+        return '#ff6b6b';
+      case 'warning':
+        return '#ff9800';
       case 'database':
+        return '#9C27B0';
       case 'permission':
-        return require('@/assets/images/info_image.png');
-      case 'info':
+        return '#FF5722';
       default:
-        return require('@/assets/images/dog_avatar.png'); // Default dog icon
+        return '#ff9d00';
     }
-  };
-
-  const getMessageColor = () => {
-    return '#6B4423'; // Darker brown for message text
   };
 
   if (!isVisible) return null;
@@ -183,37 +198,44 @@ export function Snackbar({
       <View style={[
         styles.snackbar, 
         { 
-          backgroundColor: getBackgroundColor(),
           borderColor: getBorderColor()
         }
       ]}>
+        {/* Gradient Background */}
+        <View style={styles.gradientContainer}>
+          <View style={[styles.gradientLayer, { backgroundColor: getBackgroundColors()[0] }]} />
+          <View style={[styles.gradientLayer, styles.gradientOverlay, { backgroundColor: getBackgroundColors()[1] }]} />
+        </View>
+        
         <View style={styles.content}>
           <View style={styles.leftSection}>
             <View style={[styles.iconContainer, { borderColor: getBorderColor() }]}>
-              <Image
-                source={getDogImage()}
-                style={styles.iconImage}
-                resizeMode="contain"
-              />
+              {getIcon()}
             </View>
             <View style={styles.textContainer}>
-              <Text style={[styles.title, { color: getTitleColor() }]}>
+              <Text style={styles.title}>
                 {getTitle()}
               </Text>
-              <Text style={[styles.message, { color: getMessageColor() }]} numberOfLines={3}>
+              <Text style={styles.message} numberOfLines={3}>
                 {message}
               </Text>
             </View>
           </View>
-          <TouchableOpacity
-            style={[styles.actionButton, { backgroundColor: getBorderColor() }]}
-            onPress={handleActionPress}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.actionButtonText}>
-              {actionText || 'OK'}
-            </Text>
-          </TouchableOpacity>
+          
+          {(actionText || type === 'network') && (
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: getActionButtonColor() }]}
+              onPress={handleActionPress}
+              activeOpacity={0.8}
+            >
+              {type === 'network' && (
+                <RefreshCw size={16} color="#fff8e1" style={styles.actionIcon} />
+              )}
+              <Text style={styles.actionButtonText}>
+                {actionText || (type === 'network' ? 'Retry' : 'OK')}
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </Animated.View>
@@ -230,19 +252,40 @@ const styles = StyleSheet.create({
   },
   snackbar: {
     borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    shadowColor: '#8B4513',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    shadowColor: '#47463e',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 8,
     borderWidth: 2,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  gradientContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  gradientLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  gradientOverlay: {
+    opacity: 0.3,
   },
   content: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    position: 'relative',
+    zIndex: 1,
   },
   leftSection: {
     flexDirection: 'row',
@@ -250,46 +293,55 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
-    backgroundColor: '#FFFFFF',
+    marginRight: 14,
+    backgroundColor: '#fff8e1',
     borderWidth: 2,
-  },
-  iconImage: {
-    width: 28,
-    height: 28,
+    shadowColor: '#47463e',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   textContainer: {
     flex: 1,
     marginRight: 12,
   },
   title: {
-    fontSize: 15,
+    fontSize: 16,
     fontFamily: Fonts.body.bold,
     marginBottom: 4,
+    color: '#47463e',
   },
   message: {
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: Fonts.body.regular,
-    lineHeight: 18,
+    lineHeight: 20,
+    color: '#47463e',
   },
   actionButton: {
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 18,
-    shadowColor: '#8B4513',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 20,
+    shadowColor: '#47463e',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.2,
     shadowRadius: 4,
     elevation: 3,
+    gap: 6,
+  },
+  actionIcon: {
+    marginRight: 2,
   },
   actionButtonText: {
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: Fonts.body.bold,
-    color: Colors.white,
+    color: '#fff8e1',
   },
 });

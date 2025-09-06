@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Dimensions,
   TextInput,
+  SafeAreaView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
@@ -22,10 +23,25 @@ import { useAuth } from '@/hooks/useAuth';
 import { useCoaching } from '@/hooks/useCoaching';
 import { useMediaAccess } from '@/hooks/useMediaAccess';
 import { useRevenueCat } from '@/hooks/useRevenueCat';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { usePets } from '@/hooks/useDatabase';
-import { Video, Mic, MicOff, Phone, PhoneOff, Star, Clock, CircleCheck as CheckCircle, ArrowLeft, Target, User, Play, Camera, CameraOff, Crown, Send } from 'lucide-react-native';
+import { databaseService } from '@/lib/database';
+import RevenueCatPaywall from '@/components/ui/RevenueCatPaywall';
+import Purchases from 'react-native-purchases';
+import { fixSubscriptionStatus } from '@/lib/fixSubscription';
+import { Video, Mic, MicOff, Phone, PhoneOff, Star, Clock, CircleCheck as CheckCircle, ArrowLeft, Target, User, Play, Camera, CameraOff, Crown, Send, MessageCircle, Heart, Brain, Utensils, ChevronRight, History } from 'lucide-react-native';
+import { ApiConfig } from '@/constants/apiConfig';
 
 const { width, height } = Dimensions.get('window');
+
+// Responsive sizing helpers
+const responsiveWidth = (percentage: number) => (width * percentage) / 100;
+const responsiveHeight = (percentage: number) => (height * percentage) / 100;
+const responsiveFontSize = (size: number) => {
+  const scale = width / 375; // Base on iPhone X width
+  const newSize = size * scale;
+  return Math.max(10, Math.min(newSize, size * 1.1)); // Reduced max scale and min size
+};
 
 interface CoachingState {
   status: 'setup' | 'connecting' | 'live' | 'completed';
@@ -37,7 +53,7 @@ interface CoachingState {
 }
 
 export default function CoachScreen() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const { pets } = usePets();
   const { 
     permissions, 
@@ -51,7 +67,8 @@ export default function CoachScreen() {
     hasMicrophone 
   } = useMediaAccess();
   
-  const { isSubscribed, loading: subscriptionLoading, presentPaywall } = useRevenueCat();
+  const { isSubscribed, customerInfo, isLoading: subscriptionLoading } = useSubscriptionStatus();
+  const [showPaywall, setShowPaywall] = useState(false);
   
   const {
     currentSession,
@@ -75,39 +92,90 @@ export default function CoachScreen() {
   const [sessionSetup, setSessionSetup] = useState({
     petName: '',
     petBreed: '',
+    petParentName: '',
     userConcern: '',
-    selectedConcern: '',
+    selectedTopic: '',
   });
   
   const [currentMessage, setCurrentMessage] = useState('');
   const [rating, setRating] = useState(0);
   const [sessionSummary, setSessionSummary] = useState<any>(null);
   
-  const sessionTimer = useRef<NodeJS.Timeout | null>(null);
+  const sessionTimer = useRef<number | null>(null);
 
-  // Common pet concerns for James coaching
-  const concerns = [
-    { id: 'leash-training', title: 'Leash Training', icon: '🚶‍♂️', description: 'Stop pulling and walk nicely' },
-    { id: 'basic-commands', title: 'Basic Commands', icon: '🎯', description: 'Sit, stay, come, down' },
-    { id: 'barking', title: 'Barking Issues', icon: '🔊', description: 'Reduce excessive barking' },
-    { id: 'house-training', title: 'House Training', icon: '🏠', description: 'Potty training and accidents' },
-    { id: 'anxiety', title: 'Anxiety & Stress', icon: '💙', description: 'Calm nervous behaviors' },
-    { id: 'socialization', title: 'Socialization', icon: '🐕', description: 'Meeting people and dogs' },
-    { id: 'jumping', title: 'Jumping on People', icon: '⬆️', description: 'Stop jumping behavior' },
-    { id: 'general', title: 'General Questions', icon: '💬', description: 'Any training questions' },
+  // Luna's 4 focused coaching topics with app-appropriate colors
+  const coachingTopics = [
+    { 
+      id: 'behavior-coaching', 
+      title: 'Behavior Fix', 
+      icon: '🧠', 
+      gradient: ['#fff4bb', '#f5e97d'], // Light yellow gradient
+      description: 'Train your dog smarter',
+      examples: ['Barking', 'Anxiety', 'Leash pulling'],
+      systemContext: 'The user wants to discuss dog behavior and training issues. Focus on behavioral modification, positive reinforcement techniques, and understanding canine psychology.'
+    },
+    { 
+      id: 'feeding-nutrition', 
+      title: 'Feeding Guide', 
+      icon: '🥩', 
+      gradient: ['#fff4bb', '#f5e97d'], // Light yellow gradient
+      description: 'Perfect nutrition plan',
+      examples: ['Diet plan', 'Portion size', 'Supplements'],
+      systemContext: 'The user wants nutrition and feeding guidance. Focus on diet recommendations, feeding schedules, portion control, and nutritional needs based on age, breed, and health status.'
+    },
+    { 
+      id: 'health-symptoms', 
+      title: 'Health Check', 
+      icon: '❤️', 
+      gradient: ['#fff4bb', '#f5e97d'], // Light yellow gradient
+      description: 'Symptoms & solutions',
+      examples: ['Skin issues', 'Limping', 'Eye problems'],
+      systemContext: 'The user wants to discuss health symptoms or concerns. Focus on symptom assessment, when to see a vet, first aid, and preventive health care. Always emphasize professional veterinary care for serious issues.'
+    },
+    { 
+      id: 'daily-routine', 
+      title: 'Daily Routine', 
+      icon: '⏰', 
+      gradient: ['#fff4bb', '#f5e97d'], // Light yellow gradient
+      description: 'Perfect daily schedule',
+      examples: ['Exercise plan', 'Sleep schedule', 'Activities'],
+      systemContext: 'The user wants help creating daily routines and schedules. Focus on exercise needs, mental stimulation, sleep patterns, and creating structured daily activities for optimal dog health and happiness.'
+    },
   ];
 
-  // Auto-populate pet info if available
+  // Auto-populate pet and user info if available
   useEffect(() => {
-    if (pets.length > 0 && !sessionSetup.petName) {
+    if (pets.length > 0 && user) {
       const primaryPet = pets[0];
-      setSessionSetup(prev => ({
-        ...prev,
-        petName: primaryPet.name,
-        petBreed: primaryPet.breed || '',
-      }));
+      const userName = user?.full_name || user?.name || user?.email?.split('@')[0] || '';
+      
+      console.log('🔄 AUTO-POPULATION DEBUG:');
+      console.log('- user.full_name:', user?.full_name);
+      console.log('- user.name:', user?.name);
+      console.log('- user.email:', user?.email);
+      console.log('- Extracted userName:', userName);
+      console.log('- Current sessionSetup.petParentName BEFORE:', sessionSetup.petParentName);
+      
+      setSessionSetup(prev => {
+        const newSetup = {
+          ...prev,
+          petName: prev.petName ? prev.petName : primaryPet.name,
+          petBreed: prev.petBreed ? prev.petBreed : (primaryPet.breed || ''),
+          petParentName: prev.petParentName ? prev.petParentName : userName,
+        };
+        console.log('- prev.petParentName value:', `"${prev.petParentName}"`);
+        console.log('- prev.petParentName ? check:', prev.petParentName ? 'true' : 'false');
+        console.log('- userName value:', `"${userName}"`);
+        console.log('- Setting petParentName TO:', `"${newSetup.petParentName}"`);
+        return newSetup;
+      });
     }
-  }, [pets]);
+  }, [pets, user]);
+
+  // Debug: Track sessionSetup changes
+  useEffect(() => {
+    console.log('📝 SESSION SETUP CHANGED - petParentName:', sessionSetup.petParentName);
+  }, [sessionSetup.petParentName]);
 
   // Start session timer
   useEffect(() => {
@@ -145,6 +213,59 @@ export default function CoachScreen() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const checkSessionLimits = async () => {
+    if (!user || !isSubscribed) return;
+
+    // Check if yearly subscription (unlimited)
+    const isYearly = customerInfo?.activeSubscriptions?.some((productId: string) => 
+      productId.includes('yearly') || productId.includes('annual')
+    );
+    
+    if (isYearly) {
+      return; // Unlimited sessions for yearly plan
+    }
+
+    // Monthly plan gets 4 sessions per month
+    const monthlyLimit = 4;
+    
+    try {
+      const { data: userSessions } = await databaseService.getCoachingSessions(user.id);
+      
+      if (userSessions) {
+        const now = new Date();
+        const currentMonth = now.getMonth();
+        const currentYear = now.getFullYear();
+        
+        const monthlyUsed = userSessions.filter(session => {
+          const sessionDate = new Date(session.created_at);
+          return sessionDate.getMonth() === currentMonth && 
+                 sessionDate.getFullYear() === currentYear &&
+                 session.status === 'completed';
+        }).length;
+
+        if (monthlyUsed >= monthlyLimit) {
+          Alert.alert(
+            'Monthly Limit Reached',
+            `You've used all ${monthlyLimit} sessions this month. Sessions reset monthly, or upgrade to yearly for unlimited coaching!`,
+            [
+              { text: 'OK', style: 'cancel' },
+              { 
+                text: 'Upgrade to Yearly', 
+                onPress: () => setShowPaywall(true)
+              }
+            ]
+          );
+          throw new Error('Session limit reached');
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'Session limit reached') {
+        throw error;
+      }
+      console.warn('Could not check session limits:', error);
+    }
+  };
+
   const startCoachingSession = async () => {
     if (!user) {
       Alert.alert('Error', 'Please log in to start a coaching session.');
@@ -153,13 +274,21 @@ export default function CoachScreen() {
 
     // Check if user is subscribed
     if (!isSubscribed) {
-      const { success } = await presentPaywall();
-      if (!success) return;
+      setShowPaywall(true);
+      return;
     }
 
+    // Check session limits for monthly subscribers
+    await checkSessionLimits();
+
     // Validate setup
-    if (!sessionSetup.selectedConcern) {
-      Alert.alert('Setup Required', 'Please select what you\'d like to work on with James.');
+    if (!sessionSetup.selectedTopic) {
+      Alert.alert('Setup Required', 'Please select what you\'d like to work on with Luna.');
+      return;
+    }
+
+    if (!sessionSetup.petParentName?.trim()) {
+      Alert.alert('Setup Required', 'Please enter your name so Luna can greet you personally.');
       return;
     }
 
@@ -167,7 +296,7 @@ export default function CoachScreen() {
     if (!hasCamera || !hasMicrophone) {
       Alert.alert(
         'Permissions Required',
-        'Camera and microphone access are required for live coaching sessions with James. Please enable them and try again.',
+        'Camera and microphone access are required for live coaching sessions with Luna. Please enable them and try again.',
         [{ text: 'OK' }]
       );
       return;
@@ -176,7 +305,7 @@ export default function CoachScreen() {
     setCoachingState(prev => ({ ...prev, status: 'connecting' }));
     
     try {
-      console.log('🎬 Starting coaching session with James...');
+      console.log('🎬 Starting coaching session with Luna...');
       
       // Start media stream
       const streamStarted = await startStream({
@@ -188,13 +317,28 @@ export default function CoachScreen() {
         throw new Error('Failed to start camera and microphone');
       }
 
-      // Create coaching session
-      const selectedConcernData = concerns.find(c => c.id === sessionSetup.selectedConcern);
+      // Get selected topic data
+      const selectedTopicData = coachingTopics.find(t => t.id === sessionSetup.selectedTopic);
+      
       const sessionData = {
         pet_name: sessionSetup.petName,
         pet_breed: sessionSetup.petBreed,
-        user_concern: sessionSetup.userConcern || selectedConcernData?.title,
+        user_name: sessionSetup.petParentName,
+        user_concern: sessionSetup.userConcern || selectedTopicData?.title,
+        topic_context: selectedTopicData?.systemContext,
       };
+
+      // Debug: Log user name data for troubleshooting
+      console.log('🎭 COACH SESSION DEBUG:');
+      console.log('- Input field petParentName:', sessionSetup.petParentName);
+      console.log('- Final user_name for Luna:', sessionData.user_name);
+      console.log('- Pet name for Luna:', sessionData.pet_name);
+      
+      if (!sessionData.user_name) {
+        console.log('ℹ️ INFO: No user name provided - user should enter their name for personalized greeting!');
+      } else {
+        console.log('✅ SUCCESS: Luna will greet user as:', sessionData.user_name);
+      }
 
       const { data: session, error } = await createSession(sessionData);
       
@@ -211,12 +355,12 @@ export default function CoachScreen() {
         }));
       }, 2000);
       
-      console.log('✅ Live coaching session with James started');
+      console.log('✅ Live coaching session with Luna started');
     } catch (error) {
       console.error('Failed to start session:', error);
       Alert.alert(
         'Session Start Failed',
-        'Unable to start the coaching session with James. Please check your camera and microphone permissions.',
+        'Unable to start the coaching session with Luna. Please check your camera and microphone permissions.',
         [{ text: 'OK' }]
       );
       setCoachingState(prev => ({ ...prev, status: 'setup' }));
@@ -227,7 +371,7 @@ export default function CoachScreen() {
     if (!currentSession) return;
 
     try {
-      console.log('🏁 Ending coaching session with James...');
+      console.log('🏁 Ending coaching session with Luna...');
       
       stopStream();
       
@@ -248,7 +392,7 @@ export default function CoachScreen() {
         isSpeaking: false 
       }));
       
-      console.log('✅ Coaching session with James ended successfully');
+      console.log('✅ Coaching session with Luna ended successfully');
     } catch (error) {
       console.error('Error ending session:', error);
       setCoachingState(prev => ({ ...prev, status: 'completed' }));
@@ -268,7 +412,7 @@ export default function CoachScreen() {
       
       if (error) {
         console.error('Error sending message:', error);
-        Alert.alert('Message Error', 'Failed to send message to James. Please try again.');
+        Alert.alert('Message Error', 'Failed to send message to Luna. Please try again.');
       }
     } catch (error) {
       console.error('Error in message handling:', error);
@@ -305,6 +449,7 @@ export default function CoachScreen() {
   };
 
   const startNewSession = () => {
+    console.log('🔄 START NEW SESSION called - this will reset all values!');
     stopStream();
     setCoachingState({
       status: 'setup',
@@ -314,16 +459,103 @@ export default function CoachScreen() {
       cameraEnabled: true,
       micEnabled: true,
     });
+    const userName = user?.full_name || user?.name || user?.email?.split('@')[0] || '';
+    console.log('🔄 START NEW SESSION - setting petParentName to:', `"${userName}"`);
     setSessionSetup({
       petName: pets.length > 0 ? pets[0].name : '',
       petBreed: pets.length > 0 ? pets[0].breed || '' : '',
+      petParentName: userName,
       userConcern: '',
-      selectedConcern: '',
+      selectedTopic: '',
     });
     setCurrentMessage('');
     setRating(0);
     setSessionSummary(null);
   };
+
+  // Paywall handling functions
+  const handlePaywallSuccess = () => {
+    setShowPaywall(false);
+  };
+
+  const handlePaywallClose = () => {
+    setShowPaywall(false);
+  };
+
+  const handleRestorePurchases = async () => {
+    try {
+      const customerInfo = await Purchases.restorePurchases();
+      
+      // Sync subscription status with database
+      await fixSubscriptionStatus();
+      
+      if (Object.keys(customerInfo.entitlements.active).length > 0) {
+        Alert.alert('Success', 'Your purchases have been restored!');
+      } else {
+        Alert.alert('No Purchases', 'No previous purchases found to restore.');
+      }
+    } catch (error) {
+      console.error('Restore error:', error);
+      Alert.alert('Error', 'Failed to restore purchases. Please try again.');
+    }
+  };
+
+  // Render premium upgrade prompt
+  const renderPremiumPrompt = () => (
+    <ScrollView 
+      style={styles.setupContainer}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={styles.scrollContentContainer}
+    >
+      <View style={styles.premiumPrompt}>
+        <View style={styles.premiumIcon}>
+          <Crown size={40} color="#ff9d00" />
+        </View>
+        <Text style={styles.premiumTitle}>Premium Feature</Text>
+        <Text style={styles.premiumDescription}>
+          AI Coaching with Luna is a premium feature. Upgrade to unlock personalized live coaching sessions for you and your pet!
+        </Text>
+        
+        <TouchableOpacity
+          style={styles.upgradeButton}
+          onPress={() => setShowPaywall(true)}
+        >
+          <Crown size={20} color={Colors.white} />
+          <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[styles.upgradeButton, { backgroundColor: 'transparent', borderWidth: 2, borderColor: '#ff9d00' }]}
+          onPress={handleRestorePurchases}
+        >
+          <Text style={[styles.upgradeButtonText, { color: '#ff9d00' }]}>Restore Purchases</Text>
+        </TouchableOpacity>
+        
+        <View style={styles.featureList}>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>🎥</Text>
+            <Text style={styles.featureText}>Live video coaching with Luna</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>🧠</Text>
+            <Text style={styles.featureText}>AI-powered behavior training</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>🩺</Text>
+            <Text style={styles.featureText}>Professional health guidance</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>📊</Text>
+            <Text style={styles.featureText}>Personalized coaching sessions</Text>
+          </View>
+          <View style={styles.featureItem}>
+            <Text style={styles.featureBullet}>⚡</Text>
+            <Text style={styles.featureText}>Real-time feedback & tips</Text>
+          </View>
+        </View>
+      </View>
+    </ScrollView>
+  );
 
   const renderSetupScreen = () => (
     <ScrollView 
@@ -331,36 +563,27 @@ export default function CoachScreen() {
       showsVerticalScrollIndicator={false}
       contentContainerStyle={styles.scrollContentContainer}
     >
-      <Text style={styles.sectionTitle}>Meet James, Your AI Dog Coach! 🐶</Text>
-      <Text style={styles.sectionSubtitle}>
-        James is a certified canine behavior specialist ready to help you and your furry friend with personalized training sessions.
-      </Text>
-      
-      {/* Subscription Status - Temporarily disabled */}
-      {/* {!subscriptionLoading && !isSubscribed && (
-        <Card variant="elevated" style={styles.premiumCard}>
-          <View style={styles.premiumCardContent}>
-            <Crown size={24} color="#ff9d00" />
-            <View style={styles.premiumTextContainer}>
-              <Text style={styles.premiumTitle}>Premium Feature</Text>
-              <Text style={styles.premiumDescription}>
-                Live coaching sessions with James are available with Premium subscription
-              </Text>
-            </View>
-          </View>
-          <PaywallButton 
-            title="Upgrade to Premium"
-            style={styles.premiumButton}
-            onSuccess={() => {
-              // After successful purchase, we can continue
-            }}
-          />
-        </Card>
-      )} */}
+      <View style={styles.headerSection}>
+        <Text style={styles.sectionTitle}>Meet Luna 👩‍⚕️</Text>
+        <Text style={styles.sectionSubtitle}>
+          Your AI veterinarian ready to help with personalized guidance.
+        </Text>
+      </View>
       
       {/* Pet Information */}
       <Card variant="elevated" style={styles.setupCard}>
-        <Text style={styles.setupCardTitle}>Tell James About Your Dog</Text>
+        <Text style={styles.setupCardTitle}>Tell Luna About Your Dog</Text>
+        
+        <View style={styles.inputContainer}>
+          <Text style={styles.inputLabel}>Pet Parent Name</Text>
+          <TextInput
+            style={styles.textInput}
+            value={sessionSetup.petParentName}
+            onChangeText={(text) => setSessionSetup(prev => ({ ...prev, petParentName: text }))}
+            placeholder="e.g., John, Sarah, Alex"
+            placeholderTextColor={Colors.disabled}
+          />
+        </View>
         
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Dog's Name</Text>
@@ -390,103 +613,88 @@ export default function CoachScreen() {
             style={[styles.textInput, styles.textArea]}
             value={sessionSetup.userConcern}
             onChangeText={(text) => setSessionSetup(prev => ({ ...prev, userConcern: text }))}
-            placeholder="Any specific details about your dog's behavior..."
+            placeholder="Any specific details about your dog..."
             placeholderTextColor={Colors.disabled}
             multiline
-            numberOfLines={3}
+            numberOfLines={2}
           />
         </View>
       </Card>
       
-      {/* Concern Selection */}
+      {/* Topic Selection */}
       <Card variant="elevated" style={styles.setupCard}>
-        <Text style={styles.setupCardTitle}>What would you like to work on?</Text>
+        <Text style={styles.setupCardTitle}>What would you like to discuss?</Text>
         
-        <View style={styles.concernsGrid}>
-          {concerns.map((concern) => (
+        <View style={styles.topicsGrid}>
+          {coachingTopics.map((topic) => (
             <TouchableOpacity
-              key={concern.id}
+              key={topic.id}
               style={[
-                styles.concernCard,
-                sessionSetup.selectedConcern === concern.id && styles.concernCardSelected
+                styles.topicCard,
+                sessionSetup.selectedTopic === topic.id && styles.topicCardSelected
               ]}
-              onPress={() => setSessionSetup(prev => ({ ...prev, selectedConcern: concern.id }))}
+              onPress={() => setSessionSetup(prev => ({ ...prev, selectedTopic: topic.id }))}
               activeOpacity={0.8}
             >
-              <Text style={styles.concernIcon}>{concern.icon}</Text>
-              <Text style={styles.concernTitle}>{concern.title}</Text>
-              <Text style={styles.concernDescription}>{concern.description}</Text>
+              <View style={styles.topicContent}>
+                <Text style={styles.topicIcon}>{topic.icon}</Text>
+                <Text style={styles.topicTitle}>{topic.title}</Text>
+                <Text style={styles.topicDescription}>{topic.description}</Text>
+                
+                <View style={styles.examplesContainer}>
+                  {topic.examples.slice(0, 3).map((example, index) => (
+                    <Text key={index} style={styles.exampleText}>• {example}</Text>
+                  ))}
+                </View>
+              </View>
             </TouchableOpacity>
           ))}
         </View>
       </Card>
-      
-      {/* Permission Status */}
-      {mediaLoading && (
-        <View style={styles.permissionStatus}>
-          <ActivityIndicator size="small" color="#ff9d00" />
-          <Text style={styles.permissionText}>Checking camera and microphone...</Text>
-        </View>
-      )}
-      
-      {!mediaLoading && (!hasCamera || !hasMicrophone) && (
-        <View style={styles.permissionWarning}>
-          <Text style={styles.permissionWarningText}>
-            ⚠️ Camera and microphone access required for live coaching with James
-          </Text>
-          {!hasCamera && <Text style={styles.permissionDetail}>• Camera access needed</Text>}
-          {!hasMicrophone && <Text style={styles.permissionDetail}>• Microphone access needed</Text>}
-        </View>
-      )}
+   
       
       <View style={styles.demoNotice}>
-        <Video size={20} color="#ff9d00" />
+        <Video size={18} color={Colors.primary} />
         <Text style={styles.demoNoticeText}>
-          Experience live video coaching with James, your AI dog behavior specialist
+          Live video coaching with Luna
         </Text>
       </View>
       
-       {/* Start Button - Subscription temporarily disabled */}
-       <Button
-        title="Start Live Session with James"
+      {/* Start Button */}
+      <Button
+        title="Start Live Session with Luna"
         onPress={() => {
-          // Navigate to our intro screen
-          const concernData = concerns.find(c => c.id === sessionSetup.selectedConcern);
+          // Navigate to our intro screen with topic context
+          const topicData = coachingTopics.find(t => t.id === sessionSetup.selectedTopic);
           router.push({
             pathname: '/coach/intro',
             params: {
               petName: sessionSetup.petName,
               petBreed: sessionSetup.petBreed,
-              concern: sessionSetup.userConcern || concernData?.title || 'General Training',
-              concernId: sessionSetup.selectedConcern,
+              petParentName: sessionSetup.petParentName,
+              concern: sessionSetup.userConcern || topicData?.title || 'General Consultation',
+              topicId: sessionSetup.selectedTopic,
+              topicContext: topicData?.systemContext || '',
             }
           });
         }}
         style={styles.startButton}
-        disabled={!sessionSetup.selectedConcern || !hasCamera || !hasMicrophone || mediaLoading}
+        disabled={!sessionSetup.selectedTopic || !sessionSetup.petParentName?.trim() || !hasCamera || !hasMicrophone || mediaLoading}
       />
-
-      {/* View History Button */}
-      <TouchableOpacity 
-        style={styles.historyButton}
-        onPress={() => router.push('/coach/history')}
-      >
-        <Text style={styles.historyButtonText}>View Previous Sessions</Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 
   const renderConnecting = () => (
     <View style={styles.connectingContainer}>
-      <ActivityIndicator size="large" color="#ff9d00" />
-      <Text style={styles.connectingTitle}>Connecting to James...</Text>
+      <ActivityIndicator size="large" color={Colors.primary} />
+      <Text style={styles.connectingTitle}>Connecting to Luna...</Text>
       <Text style={styles.connectingSubtitle}>
         Preparing your live coaching session
       </Text>
       
       <View style={styles.preparationSteps}>
         <Text style={styles.stepText}>✓ Camera and microphone ready</Text>
-        <Text style={styles.stepText}>✓ Connecting to James</Text>
+        <Text style={styles.stepText}>✓ Connecting to Luna</Text>
         <Text style={styles.stepText}>⏳ Starting your session...</Text>
       </View>
     </View>
@@ -497,7 +705,7 @@ export default function CoachScreen() {
       {/* Session Header */}
       <View style={styles.sessionHeader}>
         <View style={styles.sessionInfo}>
-          <Text style={styles.sessionTitle}>Live with James 🐶</Text>
+          <Text style={styles.sessionTitle}>Live with Luna 🐶</Text>
           <View style={styles.sessionMeta}>
             <View style={styles.liveIndicator}>
               <View style={styles.liveDot} />
@@ -518,17 +726,17 @@ export default function CoachScreen() {
 
       {/* Main Video Container */}
       <View style={styles.videoContainer}>
-        {/* James Video (Main) */}
+        {/* Luna Video (Main) */}
         <View style={styles.mainVideo}>
           <View style={styles.videoPlaceholder}>
             <User size={64} color="#ff9d00" />
-            <Text style={styles.coachName}>James</Text>
+            <Text style={styles.coachName}>Luna</Text>
             <Text style={styles.coachTitle}>Certified Dog Behavior Specialist</Text>
             
             {coachingState.isSpeaking && (
               <View style={styles.speakingIndicator}>
                 <View style={styles.speakingDot} />
-                <Text style={styles.speakingText}>James is responding...</Text>
+                <Text style={styles.speakingText}>Luna is responding...</Text>
               </View>
             )}
           </View>
@@ -575,7 +783,7 @@ export default function CoachScreen() {
             style={styles.messageInput}
             value={currentMessage}
             onChangeText={setCurrentMessage}
-            placeholder="Type your message to James..."
+            placeholder="Type your message to Luna..."
             placeholderTextColor={Colors.disabled}
             multiline
             maxLength={500}
@@ -634,7 +842,7 @@ export default function CoachScreen() {
         <CheckCircle size={32} color={Colors.success} />
         <Text style={styles.summaryTitle}>Session Complete! 🎉</Text>
         <Text style={styles.summarySubtitle}>
-          Great conversation with James about {sessionSetup.petName || 'your dog'}!
+          Great conversation with Luna about {sessionSetup.petName || 'your dog'}!
         </Text>
       </View>
 
@@ -658,7 +866,7 @@ export default function CoachScreen() {
 
             {/* Key Points */}
             <Card variant="elevated" style={styles.summaryCard}>
-              <Text style={styles.summaryCardTitle}>Key Points from James</Text>
+              <Text style={styles.summaryCardTitle}>Key Points from Luna</Text>
               {sessionSummary.key_points.map((point: string, index: number) => (
                 <Text key={index} style={styles.summaryListItem}>✓ {point}</Text>
               ))}
@@ -666,7 +874,7 @@ export default function CoachScreen() {
 
             {/* Recommendations */}
             <Card variant="elevated" style={styles.summaryCard}>
-              <Text style={styles.summaryCardTitle}>James's Recommendations</Text>
+              <Text style={styles.summaryCardTitle}>Luna's Recommendations</Text>
               {sessionSummary.recommendations.map((rec: string, index: number) => (
                 <Text key={index} style={styles.summaryListItem}>• {rec}</Text>
               ))}
@@ -684,7 +892,7 @@ export default function CoachScreen() {
 
         {/* Rating */}
         <Card variant="elevated" style={styles.ratingCard}>
-          <Text style={styles.ratingTitle}>How was your session with James?</Text>
+          <Text style={styles.ratingTitle}>How was your session with Luna?</Text>
           <View style={styles.ratingStars}>
             {[1, 2, 3, 4, 5].map((star) => (
               <TouchableOpacity
@@ -712,7 +920,7 @@ export default function CoachScreen() {
         />
         <Button
           title="Explore App"
-          onPress={() => router.push('/(tabs)/')}
+          onPress={() => router.push('/(tabs)')}
           variant="outline"
           style={styles.exploreButton}
         />
@@ -721,76 +929,94 @@ export default function CoachScreen() {
   );
 
   return (
-    <LinearGradient
-      colors={Colors.backgroundGradient}
-      style={styles.container}
-    >
-      <View style={styles.header}>
-        {coachingState.status !== 'setup' && (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
-            onPress={() => {
-              if (coachingState.status === 'live') {
-                Alert.alert(
-                  'End Session?',
-                  'Are you sure you want to end your live session with James?',
-                  [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'End Session', onPress: endCoachingSession, style: 'destructive' },
-                  ]
-                );
-              } else {
-                startNewSession();
-              }
-            }}
+            onPress={() => router.back()}
           >
-            <ArrowLeft size={24} color="#544c3a" />
+            <ArrowLeft size={responsiveFontSize(20)} color={Colors.text} />
           </TouchableOpacity>
-        )}
-        <Text style={styles.headerTitle}>
-          {coachingState.status === 'setup' ? 'Live AI Coaching with James' : 
-           coachingState.status === 'connecting' ? 'Connecting to James...' :
-           coachingState.status === 'completed' ? 'Session Summary' : 'Live with James'}
-        </Text>
-        
-        {/* Premium Badge - Temporarily disabled */}
-        {/* {isSubscribed && (
-          <View style={styles.premiumBadge}>
-            <Crown size={16} color={Colors.white} />
-            <Text style={styles.premiumText}>PREMIUM</Text>
-          </View>
-        )} */}
+          
+          <Text style={styles.headerTitle}>
+            {coachingState.status === 'setup' ? 'AI Mentor' : 
+             coachingState.status === 'connecting' ? 'Connecting...' :
+             coachingState.status === 'completed' ? 'Session Summary' : 'Live with Luna'}
+          </Text>
+          
+          {coachingState.status === 'setup' && (subscriptionLoading || isSubscribed) && (
+            <TouchableOpacity
+              style={styles.historyButton}
+              onPress={() => router.push('/coach/history')}
+            >
+              <History size={responsiveFontSize(20)} color={Colors.text} />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.content}>
+          {/* Loading state while checking subscription */}
+          {coachingState.status === 'setup' && subscriptionLoading && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color={Colors.primary} />
+              <Text style={styles.loadingText}>Checking subscription status...</Text>
+            </View>
+          )}
+          
+          {/* Premium prompt for non-subscribers */}
+          {coachingState.status === 'setup' && !subscriptionLoading && !isSubscribed && renderPremiumPrompt()}
+          
+          {/* Setup screen for subscribers */}
+          {coachingState.status === 'setup' && !subscriptionLoading && isSubscribed && renderSetupScreen()}
+          
+          {/* Other states */}
+          {coachingState.status === 'connecting' && renderConnecting()}
+          {coachingState.status === 'live' && renderLiveSession()}
+          {coachingState.status === 'completed' && renderSessionSummary()}
+        </View>
       </View>
 
-      <View style={styles.content}>
-        {coachingState.status === 'setup' && renderSetupScreen()}
-        {coachingState.status === 'connecting' && renderConnecting()}
-        {coachingState.status === 'live' && renderLiveSession()}
-        {coachingState.status === 'completed' && renderSessionSummary()}
-      </View>
-    </LinearGradient>
+      {/* Premium Paywall Modal */}
+      {showPaywall && (
+        <RevenueCatPaywall
+          visible={showPaywall}
+          onDismiss={handlePaywallClose}
+          onPurchaseCompleted={(customerInfo) => {
+            console.log('Purchase completed:', customerInfo);
+            handlePaywallSuccess();
+          }}
+          requiredEntitlementIdentifier="premium"
+        />
+      )}
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
   container: {
     flex: 1,
+    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingTop: 60,
-    paddingBottom: 20,
+    paddingHorizontal: responsiveWidth(6),
+    paddingTop: responsiveHeight(8),
+    paddingBottom: responsiveHeight(2.5),
     position: 'relative',
   },
   backButton: {
     position: 'absolute',
-    left: 24,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    left: responsiveWidth(6),
+    width: responsiveWidth(10),
+    height: responsiveWidth(10),
+    borderRadius: responsiveWidth(5),
     backgroundColor: Colors.white,
     alignItems: 'center',
     justifyContent: 'center',
@@ -801,31 +1027,46 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: responsiveFontSize(20),
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
     textAlign: 'center',
     flex: 1,
+    paddingHorizontal: responsiveWidth(15),
   },
-  premiumBadge: {
+  historyButton: {
     position: 'absolute',
-    right: 24,
-    flexDirection: 'row',
+    right: responsiveWidth(6),
+    width: responsiveWidth(10),
+    height: responsiveWidth(10),
+    borderRadius: responsiveWidth(5),
+    backgroundColor: Colors.white,
     alignItems: 'center',
-    backgroundColor: '#ff9d00',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  premiumText: {
-    fontSize: 10,
-    fontFamily: Fonts.body.bold,
-    color: Colors.white,
-    marginLeft: 4,
+    justifyContent: 'center',
+    shadowColor: Colors.text,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   content: {
     flex: 1,
-    paddingHorizontal: 24,
+    paddingHorizontal: responsiveWidth(6),
+  },
+  
+  // Loading Styles
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: responsiveWidth(10),
+  },
+  loadingText: {
+    fontSize: responsiveFontSize(16),
+    fontFamily: Fonts.body.medium,
+    color: Colors.text,
+    marginTop: responsiveHeight(2),
+    textAlign: 'center',
   },
   
   // Setup Screen Styles
@@ -833,186 +1074,186 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContentContainer: {
-    paddingBottom: 30,
+    paddingBottom: responsiveHeight(4),
+  },
+  headerSection: {
+    marginBottom: responsiveHeight(3.5),
+    alignItems: 'center',
   },
   sectionTitle: {
-    fontSize: 24,
+    fontSize: responsiveFontSize(22),
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: responsiveHeight(0.8),
   },
   sectionSubtitle: {
-    fontSize: 16,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
+    color: Colors.text,
     opacity: 0.7,
     textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 22,
-  },
-  premiumCard: {
-    marginBottom: 24,
-    backgroundColor: Colors.secondary,
-    borderWidth: 2,
-    borderColor: '#ff9d00',
-  },
-  premiumCardContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  premiumTextContainer: {
-    flex: 1,
-    marginLeft: 12,
-  },
-  premiumTitle: {
-    fontSize: 18,
-    fontFamily: Fonts.heading.semiBold,
-    color: '#ff9d00',
-    marginBottom: 4,
-  },
-  premiumDescription: {
-    fontSize: 14,
-    fontFamily: Fonts.body.regular,
-    color: '#544c3a',
-    lineHeight: 18,
-  },
-  premiumButton: {
-    backgroundColor: '#ff9d00',
+    lineHeight: responsiveFontSize(20),
+    paddingHorizontal: responsiveWidth(8),
   },
   setupCard: {
-    marginBottom: 20,
+    marginBottom: responsiveHeight(2),
   },
   setupCardTitle: {
-    fontSize: 18,
+    fontSize: responsiveFontSize(16),
     fontFamily: Fonts.heading.semiBold,
-    color: '#544c3a',
-    marginBottom: 16,
+    color: Colors.text,
+    marginBottom: responsiveHeight(1.5),
   },
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: responsiveHeight(1.5),
   },
   inputLabel: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(13),
     fontFamily: Fonts.body.semiBold,
-    color: '#544c3a',
-    marginBottom: 8,
+    color: Colors.text,
+    marginBottom: responsiveHeight(0.8),
   },
   textInput: {
     borderWidth: 1,
     borderColor: Colors.border,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
+    borderRadius: responsiveWidth(3),
+    paddingHorizontal: responsiveWidth(4),
+    paddingVertical: responsiveHeight(1.2),
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
+    color: Colors.text,
     backgroundColor: Colors.white,
   },
   textArea: {
-    minHeight: 80,
+    minHeight: responsiveHeight(8),
     textAlignVertical: 'top',
   },
-  concernsGrid: {
+  topicsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: 12,
+    justifyContent: 'space-evenly',
+    gap: responsiveWidth(3),
+    paddingHorizontal: 0,
   },
-  concernCard: {
-    width: (width - 72) / 2,
-    backgroundColor: Colors.white,
-    borderRadius: 16,
-    padding: 16,
+  topicCard: {
+    width: '100%',
+    backgroundColor: '#fff4bb',
+    borderRadius: responsiveWidth(5),
+    padding: 0,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: '#e6d69a',
     shadowColor: Colors.text,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 4,
+    minHeight: responsiveHeight(18),
+    overflow: 'hidden',
+    marginBottom: responsiveHeight(1.5),
   },
-  concernCardSelected: {
-    borderColor: '#ff9d00',
+  topicCardSelected: {
+    borderColor: Colors.primary,
     backgroundColor: Colors.secondary,
+    transform: [{ scale: 1.03 }],
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  concernIcon: {
-    fontSize: 32,
-    marginBottom: 8,
+  topicContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: responsiveWidth(4),
   },
-  concernTitle: {
-    fontSize: 14,
+  topicIcon: {
+    fontSize: responsiveFontSize(28),
+    marginBottom: responsiveHeight(0.8),
+  },
+  topicTitle: {
+    fontSize: responsiveFontSize(13),
     fontFamily: Fonts.body.bold,
-    color: '#544c3a',
+    color: Colors.text,
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: responsiveHeight(0.4),
   },
-  concernDescription: {
-    fontSize: 12,
+  topicDescription: {
+    fontSize: responsiveFontSize(10),
+    fontFamily: Fonts.body.medium,
+    color: Colors.text,
+    textAlign: 'center',
+    marginBottom: responsiveHeight(0.8),
+    opacity: 0.8,
+  },
+  examplesContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  exampleText: {
+    fontSize: responsiveFontSize(9),
     fontFamily: Fonts.body.regular,
     color: Colors.disabled,
+    marginBottom: responsiveHeight(0.2),
     textAlign: 'center',
-    lineHeight: 16,
   },
   permissionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.secondary,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginBottom: 16,
+    paddingHorizontal: responsiveWidth(4),
+    paddingVertical: responsiveHeight(1.5),
+    borderRadius: responsiveWidth(3),
+    marginBottom: responsiveHeight(2),
   },
   permissionText: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.medium,
-    color: '#ff9d00',
-    marginLeft: 8,
+    color: Colors.primary,
+    marginLeft: responsiveWidth(2),
   },
   permissionWarning: {
     backgroundColor: Colors.warning + '20',
     borderColor: Colors.warning,
     borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginBottom: 16,
+    paddingHorizontal: responsiveWidth(4),
+    paddingVertical: responsiveHeight(1.5),
+    borderRadius: responsiveWidth(3),
+    marginBottom: responsiveHeight(2),
   },
   permissionWarningText: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.semiBold,
     color: Colors.warning,
-    marginBottom: 8,
+    marginBottom: responsiveHeight(1),
   },
   permissionDetail: {
-    fontSize: 12,
+    fontSize: responsiveFontSize(12),
     fontFamily: Fonts.body.regular,
     color: Colors.warning,
-    marginBottom: 2,
+    marginBottom: responsiveHeight(0.25),
   },
   demoNotice: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.secondary,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
-    marginBottom: 24,
+    paddingHorizontal: responsiveWidth(4),
+    paddingVertical: responsiveHeight(1.5),
+    borderRadius: responsiveWidth(3),
+    marginBottom: responsiveHeight(3),
   },
   demoNoticeText: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.medium,
-    color: '#ff9d00',
-    marginLeft: 8,
+    color: Colors.primary,
+    marginLeft: responsiveWidth(2),
     textAlign: 'center',
     flex: 1,
   },
   startButton: {
-    marginTop: 8,
+    marginTop: responsiveHeight(1),
   },
 
   // Connecting Styles
@@ -1020,30 +1261,32 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 40,
+    paddingHorizontal: responsiveWidth(10),
   },
   connectingTitle: {
-    fontSize: 24,
+    fontSize: responsiveFontSize(24),
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
-    marginTop: 24,
-    marginBottom: 8,
+    color: Colors.text,
+    marginTop: responsiveHeight(3),
+    marginBottom: responsiveHeight(1),
+    textAlign: 'center',
   },
   connectingSubtitle: {
-    fontSize: 16,
+    fontSize: responsiveFontSize(16),
     fontFamily: Fonts.body.regular,
     color: Colors.disabled,
     textAlign: 'center',
-    marginBottom: 40,
+    marginBottom: responsiveHeight(5),
+    paddingHorizontal: responsiveWidth(5),
   },
   preparationSteps: {
     alignItems: 'flex-start',
   },
   stepText: {
-    fontSize: 16,
+    fontSize: responsiveFontSize(16),
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
-    marginBottom: 12,
+    color: Colors.text,
+    marginBottom: responsiveHeight(1.5),
   },
 
   // Live Session Styles
@@ -1054,51 +1297,52 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: responsiveHeight(2),
+    paddingHorizontal: responsiveWidth(2),
   },
   sessionInfo: {
     flex: 1,
   },
   sessionTitle: {
-    fontSize: 20,
+    fontSize: responsiveFontSize(20),
     fontFamily: Fonts.heading.semiBold,
-    color: '#544c3a',
-    marginBottom: 4,
+    color: Colors.text,
+    marginBottom: responsiveHeight(0.5),
   },
   sessionMeta: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: responsiveWidth(3),
   },
   liveIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.error,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: responsiveWidth(2),
+    paddingVertical: responsiveHeight(0.5),
+    borderRadius: responsiveWidth(3),
   },
   liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: responsiveWidth(1.5),
+    height: responsiveWidth(1.5),
+    borderRadius: responsiveWidth(0.75),
     backgroundColor: Colors.white,
-    marginRight: 4,
+    marginRight: responsiveWidth(1),
   },
   liveText: {
-    fontSize: 10,
+    fontSize: responsiveFontSize(10),
     fontFamily: Fonts.body.bold,
     color: Colors.white,
   },
   sessionDuration: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.medium,
-    color: '#ff9d00',
+    color: Colors.primary,
   },
   endButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: responsiveWidth(12),
+    height: responsiveWidth(12),
+    borderRadius: responsiveWidth(6),
     backgroundColor: Colors.error,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1111,11 +1355,11 @@ const styles = StyleSheet.create({
 
   // Video Styles
   videoContainer: {
-    height: 200,
+    height: responsiveHeight(25),
     backgroundColor: '#1a1a1a',
-    borderRadius: 20,
+    borderRadius: responsiveWidth(5),
     overflow: 'hidden',
-    marginBottom: 16,
+    marginBottom: responsiveHeight(2),
     position: 'relative',
   },
   mainVideo: {
@@ -1129,62 +1373,65 @@ const styles = StyleSheet.create({
     backgroundColor: '#2a2a2a',
   },
   coachName: {
-    fontSize: 24,
+    fontSize: responsiveFontSize(24),
     fontFamily: Fonts.heading.bold,
     color: Colors.white,
-    marginTop: 16,
+    marginTop: responsiveHeight(2),
   },
   coachTitle: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
     color: Colors.white,
     opacity: 0.8,
-    marginTop: 4,
+    marginTop: responsiveHeight(0.5),
+    textAlign: 'center',
   },
   speakingIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ff9d00',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    marginTop: 16,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: responsiveWidth(3),
+    paddingVertical: responsiveHeight(0.75),
+    borderRadius: responsiveWidth(5),
+    marginTop: responsiveHeight(2),
   },
   speakingDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: responsiveWidth(2),
+    height: responsiveWidth(2),
+    borderRadius: responsiveWidth(1),
     backgroundColor: Colors.white,
-    marginRight: 6,
+    marginRight: responsiveWidth(1.5),
   },
   speakingText: {
-    fontSize: 12,
+    fontSize: responsiveFontSize(12),
     fontFamily: Fonts.body.medium,
     color: Colors.white,
   },
   poweredBy: {
     position: 'absolute',
-    bottom: 8,
-    right: 8,
+    bottom: responsiveHeight(1),
+    right: responsiveWidth(2),
     backgroundColor: 'rgba(0,0,0,0.6)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
+    paddingHorizontal: responsiveWidth(2),
+    paddingVertical: responsiveHeight(0.5),
+    borderRadius: responsiveWidth(2),
   },
   poweredByText: {
-    fontSize: 10,
+    fontSize: responsiveFontSize(10),
     fontFamily: Fonts.body.regular,
     color: Colors.white,
     opacity: 0.8,
   },
   userVideo: {
     position: 'absolute',
-    bottom: 12,
-    left: 12,
-    width: 80,
-    height: 60,
-    borderRadius: 8,
+    bottom: responsiveHeight(1.5),
+    left: responsiveWidth(3),
+    width: responsiveWidth(20),
+    height: responsiveHeight(8),
+    borderRadius: responsiveWidth(2),
     overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: Colors.white,
   },
   userCameraView: {
     flex: 1,
@@ -1193,76 +1440,88 @@ const styles = StyleSheet.create({
   // Messages Styles
   messagesContainer: {
     flex: 1,
-    maxHeight: 200,
-    marginBottom: 16,
+    maxHeight: responsiveHeight(25),
+    marginBottom: responsiveHeight(2),
+    paddingHorizontal: responsiveWidth(2),
   },
   messageItem: {
-    marginBottom: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 12,
+    marginBottom: responsiveHeight(1),
+    paddingHorizontal: responsiveWidth(3),
+    paddingVertical: responsiveHeight(1),
+    borderRadius: responsiveWidth(3),
     maxWidth: '80%',
   },
   userMessage: {
-    backgroundColor: '#ff9d00',
+    backgroundColor: Colors.primary,
     alignSelf: 'flex-end',
   },
   aiMessage: {
     backgroundColor: Colors.white,
     alignSelf: 'flex-start',
+    shadowColor: Colors.text,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
   },
   messageText: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
+    color: Colors.text,
   },
 
   // Message Input Styles
   messageInputContainer: {
-    marginBottom: 16,
+    marginBottom: responsiveHeight(2),
   },
   messageInputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     backgroundColor: Colors.white,
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    borderRadius: responsiveWidth(5),
+    paddingHorizontal: responsiveWidth(4),
+    paddingVertical: responsiveHeight(1),
+    shadowColor: Colors.text,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   messageInput: {
     flex: 1,
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
-    maxHeight: 80,
-    paddingVertical: 8,
+    color: Colors.text,
+    maxHeight: responsiveHeight(10),
+    paddingVertical: responsiveHeight(1),
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: responsiveWidth(9),
+    height: responsiveWidth(9),
+    borderRadius: responsiveWidth(4.5),
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
+    marginLeft: responsiveWidth(2),
   },
   sendButtonActive: {
-    backgroundColor: '#ff9d00',
+    backgroundColor: Colors.primary,
   },
   sendButtonInactive: {
     backgroundColor: Colors.disabled,
+    opacity: 0.6,
   },
 
   // Controls Styles
   controlsContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 20,
-    paddingVertical: 16,
+    gap: responsiveWidth(5),
+    paddingVertical: responsiveHeight(2),
   },
   controlButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: responsiveWidth(14),
+    height: responsiveWidth(14),
+    borderRadius: responsiveWidth(7),
     backgroundColor: Colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1282,77 +1541,80 @@ const styles = StyleSheet.create({
   },
   summaryHeader: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: responsiveHeight(3),
   },
   summaryTitle: {
-    fontSize: 24,
+    fontSize: responsiveFontSize(24),
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
-    marginTop: 8,
+    color: Colors.text,
+    marginTop: responsiveHeight(1),
     textAlign: 'center',
   },
   summarySubtitle: {
-    fontSize: 16,
+    fontSize: responsiveFontSize(16),
     fontFamily: Fonts.body.regular,
     color: Colors.disabled,
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: responsiveHeight(0.5),
+    paddingHorizontal: responsiveWidth(5),
   },
   summaryCard: {
-    marginBottom: 16,
+    marginBottom: responsiveHeight(2),
   },
   summaryCardTitle: {
-    fontSize: 18,
+    fontSize: responsiveFontSize(18),
     fontFamily: Fonts.heading.semiBold,
-    color: '#544c3a',
-    marginBottom: 12,
+    color: Colors.text,
+    marginBottom: responsiveHeight(1.5),
   },
   summaryRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: responsiveHeight(1),
   },
   summaryLabel: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
-    marginLeft: 8,
-    marginRight: 8,
+    color: Colors.text,
+    marginLeft: responsiveWidth(2),
+    marginRight: responsiveWidth(2),
   },
   summaryValue: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
     color: Colors.disabled,
     flex: 1,
   },
   summaryListItem: {
-    fontSize: 14,
+    fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
-    lineHeight: 20,
-    marginBottom: 6,
+    color: Colors.text,
+    lineHeight: responsiveFontSize(20),
+    marginBottom: responsiveHeight(0.75),
   },
   
   // Rating Styles
   ratingCard: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: responsiveHeight(3),
   },
   ratingTitle: {
-    fontSize: 16,
+    fontSize: responsiveFontSize(16),
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
-    marginBottom: 12,
+    color: Colors.text,
+    marginBottom: responsiveHeight(1.5),
+    textAlign: 'center',
   },
   ratingStars: {
     flexDirection: 'row',
-    gap: 8,
+    gap: responsiveWidth(2),
   },
   
   // Action Buttons
   summaryActions: {
     flexDirection: 'row',
-    gap: 12,
+    gap: responsiveWidth(3),
+    paddingTop: responsiveHeight(2),
   },
   newSessionButton: {
     flex: 1,
@@ -1360,19 +1622,85 @@ const styles = StyleSheet.create({
   exploreButton: {
     flex: 1,
   },
-  historyButton: {
-    marginTop: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#ff9d00',
-    borderRadius: 8,
+
+  // Premium prompt styles
+  premiumPrompt: {
+    margin: 16,
+    padding: 24,
+    backgroundColor: Colors.white,
+    borderRadius: 16,
     alignItems: 'center',
+    shadowColor: Colors.text,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  historyButtonText: {
-    fontSize: 14,
+  premiumIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#fff8e3',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  premiumTitle: {
+    fontSize: 20,
+    fontFamily: Fonts.heading.bold,
+    color: '#544c3a',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  premiumDescription: {
+    fontSize: 16,
+    fontFamily: Fonts.body.regular,
+    color: '#544c3a',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  upgradeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ff9d00',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 20,
+    marginBottom: 24,
+    gap: 8,
+  },
+  upgradeButtonText: {
+    fontSize: 16,
     fontFamily: Fonts.body.semiBold,
-    color: '#ff9d00',
+    color: Colors.white,
+  },
+  featureList: {
+    width: '100%',
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  featureBullet: {
+    fontSize: 16,
+    marginRight: 12,
+    width: 20,
+  },
+  featureText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: Fonts.body.regular,
+    color: '#544c3a',
+  },
+  premiumContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: responsiveWidth(6),
+    backgroundColor: '#fff8e1',
+    borderRadius: 16,
+    margin: responsiveWidth(4),
   },
 });

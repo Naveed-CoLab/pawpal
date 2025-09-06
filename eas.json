@@ -1,0 +1,25 @@
+{
+  "cli": {
+    "version": ">= 16.11.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://tisdiucvwgvnvgggdwii.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpc2RpdWN2d2d2bnZnZ2dkd2lpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDk1NjE0NjEsImV4cCI6MjA2NTEzNzQ2MX0.aqD8fOfCQddC_-ON8_037Q_I5x9kX0NIlZwcyaBtUTo"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

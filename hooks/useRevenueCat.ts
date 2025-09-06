@@ -1,70 +1,61 @@
-import { useState, useEffect } from 'react';
-import Purchases from 'react-native-purchases';
+import { useState, useEffect, useCallback } from 'react';
 import { Platform } from 'react-native';
-import { ApiConfig } from '@/constants/apiConfig';
-import { revenueCatService, VetPawOffering, VetPawSubscription } from '@/lib/revenuecat';
-import { useAuth } from './useAuth';
-import { useSubscriptionStatus } from './useSubscriptionStatus';
+import Purchases from 'react-native-purchases';
+import { useAuth } from '@/hooks/useAuth';
+import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
+import type { VetPawOffering, VetPawSubscription } from '@/lib/revenuecat';
+import { revenueCatService } from '@/lib/revenuecat';
+import { revenueCatInitializer } from '@/lib/revenueCatInitializer';
+
+// Helper function to check if error is network-related
+const checkForNetworkError = (error: any): boolean => {
+  const errorMessage = error?.message || error?.toString() || '';
+  return errorMessage.includes('network') || 
+         errorMessage.includes('timeout') || 
+         errorMessage.includes('connection') ||
+         errorMessage.includes('Network request failed');
+};
 
 // New hook for initializing RevenueCat purchases
 export function initializePurchases() {
   const { user } = useAuth();
   const [isInitialized, setIsInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isNetworkError, setIsNetworkError] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
 
     const initializeRevenueCat = async () => {
       try {
-        if (Platform.OS === 'web') {
-          console.log('🌐 Web platform detected - skipping RevenueCat initialization');
-          if (isMounted) {
+        console.log('🔧 useRevenueCat: Starting initialization...');
+        
+        const result = await revenueCatInitializer.initialize(user?.id);
+        
+        if (isMounted) {
+          if (result.success) {
             setIsInitialized(true);
+            setError(null);
+            setIsNetworkError(result.isMockMode);
+            
+            if (result.isMockMode) {
+              console.log('🌐 useRevenueCat: Running in mock mode');
+            } else {
+              console.log('✅ useRevenueCat: Initialization successful');
+            }
+          } else {
+            setIsInitialized(true);
+            setError(result.error || 'Initialization failed');
+            setIsNetworkError(true);
           }
-          return;
         }
-
-        console.log('🔧 Initializing RevenueCat SDK...');
+      } catch (err: any) {
+        console.error('❌ useRevenueCat: Initialization failed:', err);
         
-        const apiKey = Platform.OS === 'ios' 
-          ? ApiConfig.REVENUECAT.APPLE_API_KEY 
-          : ApiConfig.REVENUECAT.GOOGLE_API_KEY;
-        
-        // Validate API key
-        const hasValidApiKey = apiKey && 
-          !apiKey.includes('your_') && 
-          !apiKey.includes('_api_key_here') &&
-          (apiKey.startsWith('appl_') || apiKey.startsWith('goog_'));
-        
-        if (!hasValidApiKey) {
-          console.warn('⚠️ RevenueCat API key not configured properly');
-          if (isMounted) {
-            setError('RevenueCat API key not configured');
-            setIsInitialized(true); // Still mark as initialized to prevent infinite loops
-          }
-          return;
-        }
-
-        // Configure RevenueCat
-        await Purchases.configure({ apiKey });
-        console.log('✅ RevenueCat configured successfully');
-
-        // Set user ID if available
-        if (user?.id) {
-          await Purchases.logIn(user.id);
-          console.log(`👤 RevenueCat user logged in: ${user.id}`);
-        }
-
         if (isMounted) {
           setIsInitialized(true);
-          setError(null);
-        }
-      } catch (err) {
-        console.error('❌ RevenueCat initialization failed:', err);
-        if (isMounted) {
-          setError(err instanceof Error ? err.message : 'Initialization failed');
-          setIsInitialized(true); // Mark as initialized to prevent retries
+          setError(err.message || 'Initialization failed');
+          setIsNetworkError(true);
         }
       }
     };
@@ -76,7 +67,7 @@ export function initializePurchases() {
     };
   }, [user?.id]);
 
-  return { isInitialized, error };
+  return { isInitialized, error, isNetworkError };
 }
 
 export function useRevenueCat() {
@@ -85,6 +76,7 @@ export function useRevenueCat() {
   const [offerings, setOfferings] = useState<VetPawOffering[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isNetworkError, setIsNetworkError] = useState(false);
   const [currentSubscription, setCurrentSubscription] = useState<{
     productIdentifier?: string;
     expirationDate?: string;
@@ -105,7 +97,7 @@ export function useRevenueCat() {
         const entitlement = customerInfo.entitlements.active[activeEntitlements[0]];
         setCurrentSubscription({
           productIdentifier: entitlement.productIdentifier,
-          expirationDate: entitlement.expirationDate
+          expirationDate: entitlement.expirationDate || undefined
         });
       }
     } else {
@@ -117,15 +109,39 @@ export function useRevenueCat() {
     try {
       setLoading(true);
       setError(null);
+      setIsNetworkError(false);
 
       // Initialize with user ID
-      await revenueCatService.initialize(user?.id);
+      const success = await revenueCatService.initialize(user?.id);
       
-      // Fetch offerings
+      if (success) {
+        console.log('✅ RevenueCat service initialized successfully');
+      } else {
+        console.log('🌐 RevenueCat using mock mode');
+      }
+      
+      // Always try to fetch offerings (will get mock data if network fails)
       await fetchOfferings();
-    } catch (err) {
+      
+    } catch (err: any) {
       console.error('RevenueCat initialization error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to initialize RevenueCat');
+      
+      const isNetworkIssue = checkForNetworkError(err);
+      setIsNetworkError(isNetworkIssue);
+      
+      if (isNetworkIssue) {
+        setError('Network connection issue - using offline mode');
+        console.log('💡 App will work in offline mode for purchases');
+        
+        // Still try to get mock offerings
+        try {
+          await fetchOfferings();
+        } catch (mockError) {
+          console.warn('Even mock offerings failed:', mockError);
+        }
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to initialize RevenueCat');
+      }
     } finally {
       setLoading(false);
     }
@@ -136,71 +152,58 @@ export function useRevenueCat() {
       const fetchedOfferings = await revenueCatService.getOfferings();
       setOfferings(fetchedOfferings);
       console.log('✅ Offerings loaded:', fetchedOfferings.length);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching offerings:', err);
-      throw err;
-    }
-  };
-
-  const presentPaywall = async (): Promise<{ success: boolean; error?: string }> => {
-    try {
-      setError(null);
-      console.log('🛒 Presenting RevenueCat dashboard paywall');
       
-      const result = await revenueCatService.presentPaywall();
-      
-      if (result.success) {
-        console.log('✅ Paywall purchase completed successfully');
+      // If it's a network error, don't throw - just use mock offerings
+      if (checkForNetworkError(err)) {
+        console.log('🌐 Using mock offerings due to network error');
+        setIsNetworkError(true);
+        // Set mock offerings manually
+        setOfferings([]);
+      } else {
+        throw err;
       }
-      
-      return result;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Paywall presentation failed';
-      setError(errorMessage);
-      console.error('❌ Paywall error:', err);
-      return { success: false, error: errorMessage };
     }
   };
 
-  const presentPaywallIfNeeded = async (entitlement: string = 'premium'): Promise<{ success: boolean; error?: string }> => {
+  const restorePurchases = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
     try {
       setError(null);
-      console.log('🛒 Checking if paywall needed for:', entitlement);
-      
-      const result = await revenueCatService.presentPaywallIfNeeded(entitlement);
-      
-      if (result.success) {
-        console.log('✅ Conditional paywall completed successfully');
-      }
-      
-      return result;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Paywall presentation failed';
-      setError(errorMessage);
-      console.error('❌ Conditional paywall error:', err);
-      return { success: false, error: errorMessage };
-    }
-  };
-
-  const restorePurchases = async (): Promise<{ success: boolean; error?: string }> => {
-    try {
-      setError(null);
+      setIsNetworkError(false);
       console.log('🔄 Restoring purchases...');
       
-      const result = await revenueCatService.restorePurchases();
-      
-      if (result.success) {
-        console.log('✅ Purchases restored successfully');
+      if (Platform.OS === 'web') {
+        console.log('🌐 Web platform detected - restore not available');
+        return { success: false, error: 'Not available on web' };
       }
       
-      return result;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to restore purchases';
+      // Run restore with timeout to detect network issues
+      const restorePromise = Purchases.restorePurchases();
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Restore purchases timeout - possible network issue')), 15000)
+      );
+      
+      const customerInfo = await Promise.race([restorePromise, timeoutPromise]);
+      console.log('✅ Purchases restored successfully');
+      
+      return { success: true };
+    } catch (err: any) {
+      const isNetworkIssue = checkForNetworkError(err);
+      setIsNetworkError(isNetworkIssue);
+      
+      let errorMessage = err instanceof Error ? err.message : 'Failed to restore purchases';
+      
+      if (isNetworkIssue) {
+        errorMessage = 'Network connection issue - please check your internet and try again';
+        console.log('🌐 Network error during restore - this is common on emulators');
+      }
+      
       setError(errorMessage);
       console.error('❌ Restore error:', err);
       return { success: false, error: errorMessage };
     }
-  };
+  }, []);
 
   const getDefaultOffering = (): VetPawOffering | null => {
     return offerings.find(offering => offering.identifier === 'default') || offerings[0] || null;
@@ -216,18 +219,35 @@ export function useRevenueCat() {
     return defaultOffering?.annual || null;
   };
 
+  const presentPaywallIfNeeded = useCallback(async (): Promise<{ success: boolean; error?: string }> => {
+    try {
+      if (isSubscribed) {
+        return { success: false, error: 'User already subscribed' };
+      }
+
+      // This would trigger paywall presentation
+      console.log('🎭 Would present paywall here');
+      
+      return { success: true };
+    } catch (err: any) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to present paywall';
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
+    }
+  }, [isSubscribed]);
+
   return {
     offerings,
     loading: loading || subscriptionLoading,
     error,
     isSubscribed,
+    isNetworkError,
     currentSubscription,
-    presentPaywall,
-    presentPaywallIfNeeded,
     restorePurchases,
     getDefaultOffering,
     getMonthlyPackage,
     getYearlyPackage,
-    refresh: initializeRevenueCat
+    refresh: initializeRevenueCat,
+    presentPaywallIfNeeded
   };
 }

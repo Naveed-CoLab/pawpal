@@ -166,15 +166,15 @@ export const SnapMoodCard: React.FC<SnapMoodCardProps> = ({
   const renderResultStep = () => {
     if (!moodResult) return null;
 
-    const moodEmoji = MoodAnalysisAPI.getMoodEmoji(moodResult.mood);
-    const moodColor = MoodAnalysisAPI.getMoodColor(moodResult.mood);
-    const confidencePercent = Math.round(moodResult.confidence * 100);
+    const moodEmoji = MoodAnalysisAPI.getMoodEmoji(moodResult.mood || 'unknown');
+    const moodColor = MoodAnalysisAPI.getMoodColor(moodResult.mood || 'unknown');
+    const confidencePercent = Math.round((moodResult.confidence || 0) * 100);
 
     return (
       <View style={styles.resultContainer}>
         <View style={[styles.moodHeader, { backgroundColor: moodColor }]}>
           <Text style={styles.moodEmoji}>{moodEmoji}</Text>
-          <Text style={styles.moodLabel}>{moodResult.mood.replace('_', ' ').toUpperCase()}</Text>
+          <Text style={styles.moodLabel}>{(moodResult.mood || 'unknown').replace('_', ' ').toUpperCase()}</Text>
         </View>
         
         <View style={styles.confidenceContainer}>
@@ -193,18 +193,18 @@ export const SnapMoodCard: React.FC<SnapMoodCardProps> = ({
           <Text style={styles.confidenceText}>{confidencePercent}%</Text>
         </View>
         
-        {moodResult.cues.length > 0 && (
+        {(moodResult.cues || []).length > 0 && (
           <View style={styles.cuesContainer}>
             <Text style={styles.sectionTitle}>Visual Cues Observed:</Text>
-            {moodResult.cues.map((cue, index) => (
-              <Text key={index} style={styles.cueItem}>• {cue}</Text>
+            {(moodResult.cues || []).map((cue, index) => (
+              <Text key={index} style={styles.cueItem}>• {cue || 'No cue data'}</Text>
             ))}
           </View>
         )}
         
         <View style={styles.adviceContainer}>
           <Text style={styles.sectionTitle}>Recommendation:</Text>
-          <Text style={styles.adviceText}>{moodResult.advice}</Text>
+          <Text style={styles.adviceText}>{moodResult.advice || 'No advice available'}</Text>
         </View>
         
         <View style={styles.saveSection}>

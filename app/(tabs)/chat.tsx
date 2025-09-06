@@ -12,41 +12,84 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import * as DocumentPicker from 'expo-document-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { Card } from '@/components/ui/Card';
 import { MarkdownText } from '@/components/ui/MarkdownText';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
-import { ApiConfig, validateGeminiApiKey } from '@/constants/apiConfig';
 import { VETERINARY_SYSTEM_PROMPT } from '@/constants/prompts';
 import { useAuth } from '@/hooks/useAuth';
 import { useChats, useChatMessages } from '@/hooks/useDatabase';
+import { useSnackbar } from '@/components/ui/SnackbarProvider';
 import { Send, Mic, Paperclip, Clock } from 'lucide-react-native';
 import { ChatHistoryModal } from '@/components/ui/ChatHistoryModal';
-import { MediaUtils, MediaResult } from '@/lib/mediaUtils';
-import { SpeechUtils, SpeechToTextResult } from '@/lib/speechUtils';
+import { OnboardingAvatar } from '@/components/ui/OnboardingAvatar';
+// Removed SpeechUtils import since voice is under maintenance
 import { GeminiVisionAPI, VisionAnalysisResult } from '@/lib/geminiVisionAPI';
+import { supabase } from '@/lib/supabase';
 
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
   timestamp: Date;
-  media?: MediaResult;
+  document?: DocumentPicker.DocumentPickerAsset;
   isAnalysis?: boolean;
 }
 
+// Badge checking functionality
+const checkChatBadges = async (userId: string, showSnackbar: (message: string, type?: string) => void) => {
+  try {
+    // Count user's chats
+    const { data: chats, error } = await supabase
+      .from('chats')
+      .select('id')
+      .eq('user_id', userId);
+
+    if (error) {
+      console.error('❌ Error counting chats for badges:', error);
+      return;
+    }
+
+    const chatCount = chats?.length || 0;
+    console.log(`🏅 User has ${chatCount} chats, checking for badges...`);
+
+    // Award badges based on milestones
+    if (chatCount === 1) {
+      console.log('🎉 First chat badge earned!');
+      showSnackbar('🏅 Badge Earned: First Conversation! Welcome to the PawPal family! (+10 points)', 'success');
+    } else if (chatCount === 5) {
+      console.log('🎉 Chat enthusiast badge earned!');
+      showSnackbar('🏅 Badge Earned: Chat Enthusiast! You\'re getting the hang of it! (+25 points)', 'success');
+    } else if (chatCount === 10) {
+      console.log('🎉 Chat master badge earned!');
+      showSnackbar('🏅 Badge Earned: Chat Master! You\'re a PawPal AI conversation pro! (+50 points)', 'success');
+    }
+  } catch (error) {
+    console.error('❌ Error checking chat badges:', error);
+  }
+};
+
+// Simple Gemini API key validation
+const validateGeminiApiKey = (apiKey: string): boolean => {
+  return apiKey.startsWith('AIza') && apiKey.length === 39;
+};
+
 export default function ChatScreen() {
-  const { user } = useAuth();
+  const { user, isLoading } = useAuth();
   const { chats, createChat, updateChat, deleteChat } = useChats();
   const [currentChatId, setCurrentChatId] = useState<string | null>(null);
   const { messages: dbMessages, createMessage } = useChatMessages(currentChatId);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
-  
+  const { showError, showSuccess, showWarning } = useSnackbar();
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: "Woof! Hello there! 🐕✨ I'm VetPaw AI, your adorable veterinary assistant! How can I help you and your precious furry friend today? 🐾💕",
+      text: "Woof! Hello there! 🐕✨ I'm PawPal AI, your adorable veterinary assistant! How can I help you and your precious furry friend today? 🐾💕",
       isUser: false,
       timestamp: new Date(),
     },
@@ -56,7 +99,6 @@ export default function ChatScreen() {
   const [isSending, setIsSending] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isProcessingMedia, setIsProcessingMedia] = useState(false);
-  const [selectedMedia, setSelectedMedia] = useState<MediaResult | null>(null);
   const flatListRef = useRef<FlatList>(null);
 
   // Initialize chat when component mounts
@@ -64,18 +106,37 @@ export default function ChatScreen() {
     const initializeChat = async () => {
       if (user && chats.length === 0) {
         // Create a new chat if none exists
-        const { data: newChat } = await createChat('VetPaw AI Chat 🐾');
+        const { data: newChat } = await createChat('PawPal AI Chat 🐾');
         if (newChat) {
           setCurrentChatId(newChat.id);
+          // Check for first chat badge
+          if (user.id) {
+            await checkChatBadges(user.id, showSuccess);
+          }
         }
       } else if (chats.length > 0) {
-        // Use the most recent chat
-        setCurrentChatId(chats[0].id);
+        // Check if there's a pending chat ID from history navigation
+        try {
+          const pendingChatId = await AsyncStorage.getItem('pendingChatId');
+          if (pendingChatId && chats.find(chat => chat.id === pendingChatId)) {
+            console.log('📱 Found pending chat ID, switching to:', pendingChatId);
+            setCurrentChatId(pendingChatId);
+            // Clear the pending chat ID
+            await AsyncStorage.removeItem('pendingChatId');
+          } else {
+            // Use the most recent chat
+            setCurrentChatId(chats[0].id);
+          }
+        } catch (error) {
+          console.error('Error checking pending chat ID:', error);
+          // Use the most recent chat as fallback
+          setCurrentChatId(chats[0].id);
+        }
       }
     };
 
     initializeChat();
-  }, [user, chats, createChat]);
+  }, [user, chats, createChat, showSuccess]);
 
   // Convert database messages to UI messages
   useEffect(() => {
@@ -86,13 +147,13 @@ export default function ChatScreen() {
         isUser: msg.sender === 'user',
         timestamp: new Date(msg.created_at),
       }));
-      
+
       // Add welcome message if it's the first time
       if (convertedMessages.length === 0) {
         setMessages([
           {
             id: '1',
-            text: "Woof! Hello there! 🐕✨ I'm VetPaw AI, your adorable veterinary assistant! How can I help you and your precious furry friend today? 🐾💕",
+            text: "Woof! Hello there! 🐕✨ I'm PawPal AI, your adorable veterinary assistant! How can I help you and your precious furry friend today? 🐾💕",
             isUser: false,
             timestamp: new Date(),
           },
@@ -105,77 +166,69 @@ export default function ChatScreen() {
   }, [dbMessages]);
 
   const callGeminiAPI = useCallback(async (message: string): Promise<string> => {
-    console.log('🤖 Chat: Starting API call to Gemini');
-    
-    // Check if API key is properly configured
-    if (!ApiConfig.GEMINI.API_KEY || ApiConfig.GEMINI.API_KEY === '' || !validateGeminiApiKey(ApiConfig.GEMINI.API_KEY)) {
-      console.log('🔄 Chat: Using fallback responses - API key not configured or invalid');
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate API delay
-      return getFallbackResponse(message);
-    }
-
-    // If fallback is enabled, use fallback responses
-    if (ApiConfig.GEMINI.USE_FALLBACK_RESPONSES) {
-      console.log('🔄 Chat: Using fallback responses - API disabled');
-      await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate API delay
-      return getFallbackResponse(message);
-    }
+    console.log('🤖 Chat: Starting API call to edge function');
 
     try {
-      console.log('📡 Chat: Making request to Gemini API...');
+      // Get current user session for authentication
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      const requestBody = {
-        contents: [
-          {
-            parts: [
-              {
-                text: `${VETERINARY_SYSTEM_PROMPT}\n\nUser: ${message}\n\nVetPaw AI:`
-              }
-            ]
-          }
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          topK: 40,
-          topP: 0.95,
-          maxOutputTokens: 1024,
-        },
-      };
-
-      console.log('📤 Chat: Request body prepared');
-
-      const response = await fetch(`${ApiConfig.GEMINI.API_URL}?key=${ApiConfig.GEMINI.API_KEY}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      console.log('📥 Chat: Received response, status:', response.status);
-
-      if (!response.ok) {
-        // Read response as text for error logging
-        const errorText = await response.text();
-        console.error('❌ Chat: HTTP error response:', errorText);
-        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+      console.log('🔐 Chat: Session debug info:');
+      console.log('- Session error:', sessionError);
+      console.log('- Has session:', !!session);
+      console.log('- User ID:', session?.user?.id);
+      console.log('- User email:', session?.user?.email);
+      console.log('- Token expires at:', session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'unknown');
+      console.log('- Token preview:', session?.access_token?.substring(0, 30) + '...');
+      console.log('- Supabase URL:', process.env.EXPO_PUBLIC_SUPABASE_URL);
+      
+      if (sessionError || !session) {
+        console.log('🔄 Chat: No active session, using fallback responses');
+        await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate API delay
+        return getFallbackResponse(message);
       }
 
-      // Only parse as JSON if response is ok
+      console.log('📡 Chat: Making request to dynamic-worker edge function...');
+      console.log('🔑 Full auth header being sent:', `Bearer ${session.access_token}`);
+      console.log('📦 Request body:', JSON.stringify({ message: message, userId: session.user.id }));
+
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/dynamic-worker`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: message,
+          userId: session.user.id
+        }),
+      });
+
+      console.log('📥 Chat: Received response from edge function, status:', response.status);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Chat: Edge function error response:', errorText);
+        throw new Error(`Edge function error! status: ${response.status}, body: ${errorText}`);
+      }
+
       const data = await response.json();
       console.log('✅ Chat: Successfully parsed API response');
-      
-      if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0]) {
-        let apiResponse = data.candidates[0].content.parts[0].text;
-        console.log('🎉 Chat: Successfully extracted response from API');
+
+      if (data.success && data.response) {
+        let apiResponse = data.response;
+        console.log('🎉 Chat: Successfully extracted response from edge function');
         
+        if (data.fallback) {
+          console.log('🔄 Chat: Response generated using fallback');
+        }
+
         // Add kawaii emojis to the response
         apiResponse = addKawaiiEmojis(apiResponse);
-        
+
         return apiResponse;
       } else {
-        console.error('❌ Chat: Invalid response structure:', data);
-        throw new Error('Invalid response structure from Gemini API');
+        console.error('❌ Chat: Invalid response structure from edge function:', data);
+        throw new Error('Invalid response structure from edge function');
       }
     } catch (error) {
       console.error('💥 Chat: Gemini API Error:', error);
@@ -210,7 +263,7 @@ export default function ChatScreen() {
     };
 
     let enhancedText = text;
-    
+
     // Add emojis based on keywords
     Object.entries(emojiMap).forEach(([keyword, emoji]) => {
       const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
@@ -229,48 +282,52 @@ export default function ChatScreen() {
 
   const getFallbackResponse = (userInput: string): string => {
     const input = userInput.toLowerCase();
-    
+
     if (input.includes('feeding') || input.includes('food')) {
       return "For feeding 🍽️🐕, adult dogs typically need 2 meals per day! The amount depends on your pup's size, age, and activity level ⚡. Always use high-quality dog food 🥘 and avoid human foods that can be toxic like chocolate 🍫❌, grapes 🍇❌, and onions 🧅❌. Keep your furry friend healthy and happy! 🐾💕";
     }
-    
+
     if (input.includes('sick') || input.includes('vomit') || input.includes('diarrhea')) {
       return "Oh no! 😟 If your precious pup 🐶 is showing signs of illness like vomiting 🤢 or diarrhea 💩, monitor them closely 👀. Withhold food for 12-24 hours but ensure they have fresh water 💧. If symptoms persist for more than 24 hours or you notice blood 🩸, lethargy 😴, or severe dehydration, please contact your veterinarian immediately! 🏥🚨 Your pup's health is precious! 💕";
     }
-    
+
     if (input.includes('training') || input.includes('behavior')) {
       return "Training time! 🎾✨ Positive reinforcement is the most effective method! Use treats 🦴, praise 👏, and consistency 📅. Start with basic commands like 'sit' 🪑, 'stay' ✋, and 'come' 🏃‍♂️. Keep training sessions short (5-10 minutes) ⏰ and always end on a positive note! 🎉 Remember, patience is key! Your pup is learning! 🐕📚💕";
     }
-    
+
     if (input.includes('puppy') || input.includes('baby')) {
       return "Aww, a puppy! 🐶💕 Puppies are so precious and need extra special care! 👶🐾 Make sure they get proper vaccinations 💉, lots of love 💖, gentle training 🎓, and appropriate puppy food 🍼. Socialization is super important too! 👥🐕 Your little fur baby will grow up to be amazing! ✨🌟";
     }
-    
+
     return "That's such a wonderful question! 🤔💭 For specific health concerns, I recommend consulting with your local veterinarian 👩‍⚕️🏥. In the meantime, ensure your precious pup has fresh water 💧, a comfortable environment 🏠, and regular exercise 🏃‍♂️🐕! Is there anything specific about your furry friend's behavior or health you'd like to discuss? I'm here to help! 🐾💕✨";
   };
 
   // Chat management functions
   const handleCreateNewChat = useCallback(async () => {
-    const { data: newChat } = await createChat('VetPaw AI Chat 🐾');
+    const { data: newChat } = await createChat('PawPal AI Chat 🐾');
     if (newChat) {
       setCurrentChatId(newChat.id);
+      // Check for chat milestone badges
+      if (user?.id) {
+        await checkChatBadges(user.id, showSuccess);
+      }
       // Clear current messages to start fresh
       setMessages([
         {
           id: '1',
-          text: "Woof! Hello there! 🐕✨ I'm VetPaw AI, your adorable veterinary assistant! How can I help you and your precious furry friend today? 🐾💕",
+          text: "Woof! Hello there! 🐕✨ I'm PawPal AI, your adorable veterinary assistant! How can I help you and your precious furry friend today? 🐾💕",
           isUser: false,
           timestamp: new Date(),
         },
       ]);
     }
-  }, [createChat]);
+  }, [createChat, user?.id, showSuccess]);
 
   const handleSelectChat = useCallback((chatId: string) => {
     console.log(`🔄 Switching to chat: ${chatId}`);
     setCurrentChatId(chatId);
     setShowHistoryModal(false);
-    
+
     // Clear current messages - they will be reloaded from the database
     setMessages([]);
   }, []);
@@ -278,10 +335,10 @@ export default function ChatScreen() {
   const handleDeleteChat = useCallback(async (chatId: string) => {
     try {
       console.log(`🗑️ Deleting chat: ${chatId}`);
-      
+
       // Delete the chat and all its messages from the database
       const { error } = await deleteChat(chatId);
-      
+
       if (error) {
         console.error('❌ Failed to delete chat:', error);
         Alert.alert(
@@ -293,7 +350,7 @@ export default function ChatScreen() {
       }
 
       console.log('✅ Chat deleted successfully');
-      
+
       // If we deleted the current chat, switch to another one or create new
       if (chatId === currentChatId) {
         const remainingChats = chats.filter(chat => chat.id !== chatId);
@@ -306,10 +363,10 @@ export default function ChatScreen() {
           await handleCreateNewChat();
         }
       }
-      
+
       // Close the modal after successful deletion
       setShowHistoryModal(false);
-      
+
     } catch (error) {
       console.error('💥 Error in handleDeleteChat:', error);
       Alert.alert(
@@ -323,7 +380,7 @@ export default function ChatScreen() {
   const handleDeleteAllChats = useCallback(async () => {
     try {
       console.log('🗑️ Deleting all chats');
-      
+
       // Confirm with the user
       Alert.alert(
         'Delete All Chats',
@@ -336,7 +393,7 @@ export default function ChatScreen() {
             onPress: async () => {
               // Show loading indicator
               setIsTyping(true);
-              
+
               // Delete each chat one by one
               for (const chat of chats) {
                 const { error } = await deleteChat(chat.id);
@@ -351,16 +408,16 @@ export default function ChatScreen() {
                   return;
                 }
               }
-              
+
               // Create a new chat
               await handleCreateNewChat();
-              
+
               // Hide loading indicator
               setIsTyping(false);
-              
+
               // Close the modal
               setShowHistoryModal(false);
-              
+
               // Show success message
               Alert.alert(
                 'Success',
@@ -386,143 +443,82 @@ export default function ChatScreen() {
     await updateChat(chatId, { title });
   }, [updateChat]);
 
-  // Media handling functions
-  const handleMediaUpload = useCallback(async () => {
+  // Document handling functions
+  const handleDocumentUpload = useCallback(async () => {
     if (isSending || isProcessingMedia) return;
 
     try {
       setIsProcessingMedia(true);
-      const media = await MediaUtils.showMediaPicker();
-      
-      if (media) {
-        setSelectedMedia(media);
-        
-        // Create a message with the media
-        const mediaMessage: Message = {
+
+      const result = await DocumentPicker.getDocumentAsync({
+        type: '*/*',
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const document = result.assets[0];
+
+        // Create a message with the document
+        const documentMessage: Message = {
           id: Date.now().toString(),
-          text: `📸 ${media.type === 'image' ? 'Image' : 'Video'} uploaded for analysis`,
+          text: `📄 Document uploaded: ${document.name}`,
           isUser: true,
           timestamp: new Date(),
-          media: media,
+          document: document,
         };
 
-        setMessages(prev => [...prev, mediaMessage]);
-        
-        // Save media message to database
+        setMessages(prev => [...prev, documentMessage]);
+
+        // Save document message to database
         if (currentChatId) {
           await createMessage({
             chat_id: currentChatId,
             sender: 'user',
-            message: `[MEDIA:${media.type.toUpperCase()}] ${media.name || 'media'} - ${MediaUtils.formatFileSize(media.size)}`,
+            message: `[DOCUMENT] ${document.name} - ${document.size ? (document.size / 1024 / 1024).toFixed(2) : '0'}MB`,
           });
         }
 
-        // Analyze the media with Gemini Vision
+        // Provide helpful response about the document
         setIsTyping(true);
-        setIsSending(true);
 
-        try {
-          console.log('🔍 Starting media analysis...');
-          const analysisResult = await GeminiVisionAPI.analyzeMedia(
-            media,
-            'Please analyze this image/video of my pet and provide a comprehensive health assessment.'
-          );
+        const docResponse: Message = {
+          id: (Date.now() + 1).toString(),
+          text: `Thank you for sharing the document "${document.name}"! 📄✨ I can see you've uploaded a ${document.mimeType || 'file'} document. While I can't directly read document contents yet, I'm here to help answer any questions you have about your pet's health based on the information you share with me! 🐾💕 
 
-          const analysisResponse: Message = {
-            id: (Date.now() + 1).toString(),
-            text: GeminiVisionAPI.formatAnalysisForChat(analysisResult),
-            isUser: false,
-            timestamp: new Date(),
-            isAnalysis: true,
-          };
+Feel free to tell me what's in the document or ask any specific questions about your furry friend! 🐕`,
+          isUser: false,
+          timestamp: new Date(),
+        };
 
-          setMessages(prev => [...prev, analysisResponse]);
-          
-          // Save analysis to database
-          if (currentChatId) {
-            await createMessage({
-              chat_id: currentChatId,
-              sender: 'ai',
-              message: analysisResponse.text,
-            });
-          }
-          
-          console.log('✅ Media analysis completed');
-        } catch (error) {
-          console.error('💥 Error analyzing media:', error);
-          const errorResponse: Message = {
-            id: (Date.now() + 1).toString(),
-            text: "I apologize, but I'm having trouble analyzing your image/video right now. 😅 For any urgent health concerns about your pet, please consult with a veterinarian directly! 🏥🐾💕",
-            isUser: false,
-            timestamp: new Date(),
-          };
-          
-          setMessages(prev => [...prev, errorResponse]);
-          
-          if (currentChatId) {
-            await createMessage({
-              chat_id: currentChatId,
-              sender: 'ai',
-              message: errorResponse.text,
-            });
-          }
+        setMessages(prev => [...prev, docResponse]);
+
+        // Save response to database
+        if (currentChatId) {
+          await createMessage({
+            chat_id: currentChatId,
+            sender: 'ai',
+            message: docResponse.text,
+          });
         }
       }
     } catch (error) {
-      console.error('💥 Error handling media upload:', error);
-      Alert.alert('Upload Error', 'Failed to upload media. Please try again.');
+      console.error('💥 Error handling document upload:', error);
+      Alert.alert('Upload Error', 'Failed to upload document. Please try again.');
     } finally {
       setIsProcessingMedia(false);
       setIsTyping(false);
-      setIsSending(false);
-      setSelectedMedia(null);
     }
   }, [createMessage, currentChatId, isProcessingMedia, isSending]);
 
   // Speech-to-text functions
   const handleSpeechToText = useCallback(async () => {
     if (isSending || isListening) return;
+    showWarning('Voice input is under maintenance. Please type your message for now.');
+    return;
+  }, [isListening, isSending, showWarning]);
 
-    try {
-      if (Platform.OS === 'web') {
-        const success = await SpeechUtils.startSpeechToText(
-          (result: SpeechToTextResult) => {
-            if (result.text && !result.error) {
-              setInputText(prev => prev + (prev ? ' ' : '') + result.text);
-            } else if (result.error) {
-              console.error('Speech recognition error:', result.error);
-              Alert.alert('Speech Recognition', result.error);
-            }
-          },
-          () => {
-            setIsListening(true);
-            console.log('🎤 Speech recognition started');
-          },
-          () => {
-            setIsListening(false);
-            console.log('🎤 Speech recognition ended');
-          }
-        );
-
-        if (!success) {
-          setIsListening(false);
-        }
-      } else {
-        // For mobile, show a more helpful message
-        Alert.alert(
-          'Voice Input',
-          'Voice input is coming soon! We\'re working on making this feature available in our next update.',
-          [{ text: 'OK' }]
-        );
-      }
-    } catch (error) {
-      console.error('💥 Error starting speech recognition:', error);
-      setIsListening(false);
-    }
-  }, [isListening, isSending]);
-
-  const stopSpeechToText = useCallback(() => {
-    SpeechUtils.stopSpeechToText();
+  const stopSpeechToText = useCallback(async () => {
     setIsListening(false);
   }, []);
 
@@ -538,7 +534,7 @@ export default function ChatScreen() {
 
     // Add user message to UI immediately
     setMessages(prev => [...prev, userMessage]);
-    
+
     // Save user message to database
     await createMessage({
       chat_id: currentChatId,
@@ -554,24 +550,24 @@ export default function ChatScreen() {
     try {
       console.log('🚀 Chat: Starting message send process');
       const aiResponseText = await callGeminiAPI(currentInput);
-      
+
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         text: aiResponseText,
         isUser: false,
         timestamp: new Date(),
       };
-      
+
       // Add AI response to UI
       setMessages(prev => [...prev, aiResponse]);
-      
+
       // Save AI response to database
       await createMessage({
         chat_id: currentChatId,
         sender: 'ai',
         message: aiResponseText,
       });
-      
+
       console.log('✅ Chat: Message send process completed successfully');
     } catch (error) {
       console.error('💥 Chat: Error in send message process:', error);
@@ -581,9 +577,9 @@ export default function ChatScreen() {
         isUser: false,
         timestamp: new Date(),
       };
-      
+
       setMessages(prev => [...prev, fallbackResponse]);
-      
+
       // Save fallback response to database
       if (currentChatId) {
         await createMessage({
@@ -610,44 +606,45 @@ export default function ChatScreen() {
         {/* Avatar Image */}
         <Image
           source={
-            item.isUser 
-              ? require('@/assets/images/login page icon.png') // User avatar
-              : require('@/assets/images/onboarding1.png')    // AI vet avatar (cute dog)
+            item.isUser
+              ? (user?.avatar_url
+                ? { uri: user.avatar_url }
+                : require('@/assets/images/login page icon.png')
+              )
+              : require('@/assets/images/lumi.png')    // AI vet avatar (cute dog)
           }
           style={[
             styles.avatarImage,
             item.isUser ? styles.userAvatar : styles.aiAvatar
           ]}
-          resizeMode="contain"
+          resizeMode="cover"
         />
-        
+
         {/* Message Card */}
         <Card
           variant={item.isUser ? 'default' : 'elevated'}
-          style={[
-            styles.messageCard,
-            item.isUser ? styles.userMessageCard : styles.aiMessageCard
-          ]}
+          style={{
+            ...styles.messageCard,
+            ...(item.isUser ? styles.userMessageCard : styles.aiMessageCard)
+          }}
         >
-          {/* Media Preview */}
-          {item.media && (
-            <View style={styles.mediaContainer}>
-              {item.media.type === 'image' ? (
-                <Image
-                  source={{ uri: item.media.uri }}
-                  style={styles.mediaImage}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={styles.videoPlaceholder}>
-                  <Paperclip size={36} color={Colors.white} />
-                  <Text style={styles.videoText}>Video: {item.media.name}</Text>
-                  <Text style={styles.videoSize}>{MediaUtils.formatFileSize(item.media.size)}</Text>
+          {/* Document Preview */}
+          {item.document && (
+            <View style={styles.documentContainer}>
+              <View style={styles.documentInfo}>
+                <Paperclip size={24} color="#ff9d00" />
+                <View style={styles.documentDetails}>
+                  <Text style={styles.documentName} numberOfLines={2}>
+                    {item.document.name}
+                  </Text>
+                  <Text style={styles.documentSize}>
+                    {item.document.size ? (item.document.size / 1024 / 1024).toFixed(2) : '0'} MB
+                  </Text>
                 </View>
-              )}
+              </View>
             </View>
           )}
-          
+
           {item.isUser ? (
             <Text style={[
               styles.messageText,
@@ -669,20 +666,20 @@ export default function ChatScreen() {
         </Card>
       </View>
     </View>
-  ), []);
+  ), [user?.avatar_url]);
 
   const renderTypingIndicator = useCallback(() => (
     <View style={styles.typingContainer}>
       <View style={styles.messageContent}>
         <Image
-          source={require('@/assets/images/onboarding1.png')}
+          source={require('@/assets/images/lumi.png')}
           style={[styles.avatarImage, styles.aiAvatar]}
-          resizeMode="contain"
+          resizeMode="cover"
         />
         <Card variant="elevated" style={styles.typingCard}>
           <View style={styles.typingContent}>
             <ActivityIndicator size="small" color="#ff9d00" />
-            <Text style={styles.typingText}>VetPaw is thinking... 🤔💭</Text>
+            <Text style={styles.typingText}>Lumi is thinking... 🤔💭</Text>
           </View>
         </Card>
       </View>
@@ -694,7 +691,7 @@ export default function ChatScreen() {
     const timer = setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
-    
+
     return () => clearTimeout(timer);
   }, [messages, isTyping]);
 
@@ -703,10 +700,10 @@ export default function ChatScreen() {
       <View style={styles.header}>
         <View style={styles.headerContent}>
           <View style={styles.headerText}>
-            <Text style={styles.headerTitle}>VetPaw AI Assistant 🐾</Text>
+            <Text style={styles.headerTitle}>PawPal AI Assistant 🐾</Text>
             <Text style={styles.headerSubtitle}>Your caring veterinary companion ✨💕</Text>
           </View>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.historyButton}
             onPress={() => setShowHistoryModal(true)}
             activeOpacity={0.7}
@@ -721,7 +718,7 @@ export default function ChatScreen() {
       <KeyboardAvoidingView
         style={styles.chatContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 60 : 0}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 140 : 80}
       >
         <FlatList
           ref={flatListRef}
@@ -743,22 +740,27 @@ export default function ChatScreen() {
         <View style={styles.inputContainer}>
           <View style={styles.inputCard}>
             <View style={styles.inputRow}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[
-                  styles.actionButton, 
+                  styles.actionButton,
                   (isSending || isProcessingMedia) && styles.actionButtonDisabled
                 ]}
                 disabled={isSending || isProcessingMedia}
-                onPress={handleMediaUpload}
+                onPress={handleDocumentUpload}
                 activeOpacity={0.7}
               >
                 {isProcessingMedia ? (
                   <ActivityIndicator size={18} color={Colors.white} />
                 ) : (
-                  <Paperclip size={20} color={Colors.white} />
+                  <Image
+                    source={require('@/assets/images/clip.png')} // Replace with your actual image path
+                    style={{ width: 30, height: 30 }}
+
+                  />
                 )}
+
               </TouchableOpacity>
-              
+
               <TextInput
                 style={[styles.textInput, isSending && styles.textInputDisabled]}
                 value={inputText}
@@ -769,10 +771,10 @@ export default function ChatScreen() {
                 maxLength={500}
                 editable={!isSending}
               />
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={[
-                  styles.actionButton, 
+                  styles.actionButton,
                   isListening && styles.actionButtonActive,
                   isSending && styles.actionButtonDisabled
                 ]}
@@ -785,10 +787,15 @@ export default function ChatScreen() {
                     <ActivityIndicator size={14} color={Colors.white} />
                   </View>
                 ) : (
-                  <Mic size={20} color={Colors.white} />
+                  <Image
+                    source={require('@/assets/images/microphone-icon.png')} // replace with your actual path 
+                    style={{ width: 30, height: 30 }}
+
+                  />
                 )}
+
               </TouchableOpacity>
-              
+
               <TouchableOpacity
                 style={[
                   styles.sendButton,
@@ -807,7 +814,7 @@ export default function ChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
-      
+
       {/* Chat History Modal */}
       <ChatHistoryModal
         visible={showHistoryModal}
@@ -819,6 +826,11 @@ export default function ChatScreen() {
         onDeleteChat={handleDeleteChat}
         onUpdateChatTitle={handleUpdateChatTitle}
         onDeleteAllChats={handleDeleteAllChats}
+      />
+      
+      {/* Onboarding Avatar for First-Time Users */}
+      <OnboardingAvatar 
+        currentScreen="chat"
       />
     </View>
   );
@@ -882,7 +894,7 @@ const styles = StyleSheet.create({
   },
   messagesList: {
     paddingHorizontal: 5,
-    paddingBottom: 120,
+    paddingBottom: 20,
     paddingTop: 8,
   },
   messageContainer: {
@@ -901,43 +913,49 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     width: '100%',
+    maxWidth: '95%',
   },
   userMessageContent: {
-    justifyContent: 'flex-end',
+    flexDirection: 'row-reverse', // Avatar on right for user
+    justifyContent: 'flex-start',
   },
   aiMessageContent: {
+    flexDirection: 'row', // Avatar on left for AI
     justifyContent: 'flex-start',
   },
   avatarImage: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     marginHorizontal: 4,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   userAvatar: {
-    order: 2,
+    // Avatar styling for user (no additional properties needed)
   },
   aiAvatar: {
-    order: 1,
+    // Avatar styling for AI (no additional properties needed)
   },
   messageCard: {
     flex: 1,
+    maxWidth: '100%',
   },
   userMessageCard: {
     backgroundColor: '#ff9d00',
-    order: 1,
     borderTopRightRadius: 4,
     borderBottomRightRadius: 16,
     borderBottomLeftRadius: 16,
     borderTopLeftRadius: 16,
+    marginRight: 4, // Space between avatar and message
   },
   aiMessageCard: {
     backgroundColor: Colors.white,
-    order: 2,
     borderTopRightRadius: 16,
     borderBottomRightRadius: 16,
-    borderBottomLeftRadius: 16,
-    borderTopLeftRadius: 4,
+    borderBottomLeftRadius: 4,
+    borderTopLeftRadius: 16,
+    marginLeft: 4, // Space between avatar and message
   },
   messageText: {
     fontSize: 11,
@@ -966,7 +984,7 @@ const styles = StyleSheet.create({
   },
   typingContainer: {
     alignItems: 'flex-start',
-    marginVertical: 4,
+    marginVertical: 2,
     width: '100%',
     paddingRight: '15%',
   },
@@ -990,15 +1008,10 @@ const styles = StyleSheet.create({
     marginLeft: 6,
   },
   inputContainer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: 8,
-    paddingBottom: Platform.select({ ios: 16, android: 8 }),
+    paddingHorizontal: 5,
+    paddingBottom: Platform.select({ ios: 10, android: 5 }), // Account for tab bar + safe area
     paddingTop: 8,
     backgroundColor: Colors.background,
-    zIndex: 10,
   },
   inputCard: {
     backgroundColor: Colors.white,
@@ -1067,6 +1080,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  documentContainer: {
+    marginBottom: 10,
+    padding: 12,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+  },
+  documentInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  documentDetails: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  documentName: {
+    fontSize: 13,
+    fontFamily: Fonts.body.medium,
+    color: '#544c3a',
+    marginBottom: 2,
+  },
+  documentSize: {
+    fontSize: 11,
+    fontFamily: Fonts.body.regular,
+    color: Colors.disabled,
+  },
   mediaContainer: {
     marginBottom: 10,
     borderRadius: 12,
@@ -1111,7 +1151,7 @@ const styles = StyleSheet.create({
     shadowColor: Colors.primary,
     shadowOffset: {
       width: 0,
-      height: 1,
+      height: 2,
     },
     shadowOpacity: 0.15,
     shadowRadius: 2,
