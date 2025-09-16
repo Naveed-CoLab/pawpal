@@ -170,7 +170,8 @@ export default function ChatScreen() {
 
     try {
       // Get current user session for authentication
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const { supabase: supaClient } = await import('@/lib/supabase');
+      const { data: { session }, error: sessionError } = await supaClient.auth.getSession();
       
       console.log('🔐 Chat: Session debug info:');
       console.log('- Session error:', sessionError);
@@ -191,27 +192,31 @@ export default function ChatScreen() {
       console.log('🔑 Full auth header being sent:', `Bearer ${session.access_token}`);
       console.log('📦 Request body:', JSON.stringify({ message: message, userId: session.user.id }));
 
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/dynamic-worker`, {
+      const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY as string | undefined;
+      const baseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL as string;
+      const fnUrl = `${baseUrl.replace(/\/$/, '')}/functions/v1/dynamic-worker`;
+
+      const resp = await fetch(fnUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          ...(anonKey ? { apikey: anonKey } : {}),
         },
-        body: JSON.stringify({
-          message: message,
-          userId: session.user.id
-        }),
+        body: JSON.stringify({ message, userId: session.user.id }),
       });
 
-      console.log('📥 Chat: Received response from edge function, status:', response.status);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Chat: Edge function error response:', errorText);
-        throw new Error(`Edge function error! status: ${response.status}, body: ${errorText}`);
+      const raw = await resp.text();
+      if (!resp.ok) {
+        console.error('❌ Edge function non-2xx:', resp.status, raw);
+        throw new Error(`Edge function ${resp.status}`);
       }
+      let data: any = null;
+      try { data = JSON.parse(raw); } catch { data = { success: false }; }
 
-      const data = await response.json();
+      if (!data) {
+        throw new Error('No data');
+      }
       console.log('✅ Chat: Successfully parsed API response');
 
       if (data.success && data.response) {
@@ -232,9 +237,9 @@ export default function ChatScreen() {
       }
     } catch (error) {
       console.error('💥 Chat: Gemini API Error:', error);
-      Alert.alert('API Error', 'Failed to get a response. Please try again later.');
-      console.log('🔄 Chat: Falling back to demo responses due to API error');
-      return getFallbackResponse(message);
+      const busyMsg = "Sorry, Lumi is busy at the moment or feeling a bit sick. Please try again later. \\shutdown";
+      console.log('🔄 Chat: Falling back with busy message');
+      return busyMsg;
     }
   }, []);
 
@@ -881,7 +886,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: 2,
   },
   headerSubtitle: {
@@ -967,7 +972,7 @@ const styles = StyleSheet.create({
     color: Colors.white,
   },
   aiMessageText: {
-    color: '#544c3a',
+    color: Colors.text,
   },
   messageTime: {
     fontSize: 9,
@@ -1037,7 +1042,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
+    color: Colors.text,
     marginHorizontal: 6,
     maxHeight: 70,
     minHeight: 32,
@@ -1099,7 +1104,7 @@ const styles = StyleSheet.create({
   documentName: {
     fontSize: 13,
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: 2,
   },
   documentSize: {

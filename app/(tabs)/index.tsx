@@ -22,6 +22,7 @@ import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { ChevronRight, Video, Bell, Sparkles, RefreshCw } from 'lucide-react-native';
 import { OnboardingAvatar } from '@/components/ui/OnboardingAvatar';
+import { MoodGauge } from '@/components/ui/MoodGauge';
 
 const { width, height } = Dimensions.get('window');
 
@@ -54,9 +55,9 @@ const tipImages = [
 // Helper function to get mood emoji and color
 const getMoodDisplay = (mood: string) => {
   const moodMap: { [key: string]: { emoji: string; color: string; label: string } } = {
-    happy: { emoji: '😊', color: '#4CAF50', label: 'Happy' },
+    happy: { emoji: '😊', color: '#ff9d00', label: 'Happy' },
     excited: { emoji: '🤩', color: '#ff9d00', label: 'Excited' },
-    relaxed: { emoji: '😌', color: '#2196F3', label: 'Relaxed' },
+    relaxed: { emoji: '😌', color: '#FFB300', label: 'Relaxed' },
     curious: { emoji: '🤔', color: '#9C27B0', label: 'Curious' },
     anxious: { emoji: '😰', color: '#FF5722', label: 'Anxious' },
     fearful: { emoji: '😨', color: '#F44336', label: 'Fearful' },
@@ -65,7 +66,25 @@ const getMoodDisplay = (mood: string) => {
     uncertain: { emoji: '😕', color: '#795548', label: 'Uncertain' },
   };
   
-  return moodMap[mood] || { emoji: '🐕', color: '#4CAF50', label: 'Unknown' };
+  return moodMap[mood] || { emoji: '🐕', color: '#ff9d00', label: 'Unknown' };
+};
+
+// Convert mood + confidence (0-1) into a 0-100 score for the gauge
+const getMoodScore = (mood: string, confidence?: number) => {
+  const base = (
+    mood === 'excited' ? 92 :
+    mood === 'happy' ? 85 :
+    mood === 'relaxed' ? 78 :
+    mood === 'curious' ? 68 :
+    mood === 'bored' ? 48 :
+    mood === 'anxious' ? 32 :
+    mood === 'fearful' ? 22 :
+    mood === 'in pain' ? 12 :
+    60
+  );
+  const conf = typeof confidence === 'number' ? Math.max(0, Math.min(1, confidence)) : 0.6;
+  const score = base * (0.6 + 0.4 * conf); // weight confidence modestly
+  return Math.max(0, Math.min(100, Math.round(score)));
 };
 
 export default function HomeScreen() {
@@ -82,12 +101,14 @@ export default function HomeScreen() {
   const { moodLogs, getMoodStats } = useMoodLogs();
   
   // Get latest mood for the primary pet (memoized to prevent re-renders)
-  const petMoodLogs = useMemo(() => 
-    primaryPet ? moodLogs.filter(log => log.pet_id === primaryPet.id) : [], 
-    [primaryPet, moodLogs]
-  );
+  const petMoodLogs = useMemo(() => {
+    if (!primaryPet) return [] as typeof moodLogs;
+    const logsForPet = moodLogs.filter(log => log.pet_id === primaryPet.id);
+    // Ensure stable latest selection regardless of upstream ordering
+    return logsForPet.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [primaryPet, moodLogs]);
   const latestMood = petMoodLogs.length > 0 ? petMoodLogs[0] : null;
-  const moodDisplay = latestMood ? getMoodDisplay(latestMood.mood) : getMoodDisplay('happy');
+  const moodDisplay = useMemo(() => (latestMood ? getMoodDisplay(latestMood.mood) : null), [latestMood]);
   
   // Use AI-powered daily tips
   const { 
@@ -294,58 +315,80 @@ export default function HomeScreen() {
 
         {/* Enhanced Dog Profile Widget */}
         <View style={styles.dogProfileWidget}>
-          <View style={styles.dogAvatarContainer}>
-            {/* Progress Ring around Avatar - shows weekly activity */}
-            <View style={styles.progressRing}>
-              <View style={[styles.progressFill, { 
-                transform: [{ rotate: `${(petMoodLogs.length * 51.4)}deg` }] // 360/7 = 51.4deg per day
-              }]} />
+          {/* Row 1: Avatar left, name/breed right */}
+          <View style={styles.dogHeaderRow}>
+            <View style={styles.dogAvatarContainer}>
+              {/* Progress Ring around Avatar - shows weekly activity */}
+              <View style={styles.progressRing} />
+              <Image 
+                source={
+                  primaryPet?.avatar_url 
+                    ? { uri: primaryPet.avatar_url }
+                    : require('@/assets/images/login page icon.png')
+                } 
+                style={styles.dogAvatar} 
+                resizeMode="cover"
+              />
+              {latestMood && moodDisplay && (
+                <View style={[styles.moodIndicator, { backgroundColor: moodDisplay.color }]}>
+                  <Text style={styles.moodEmoji}>{moodDisplay.emoji}</Text>
+                </View>
+              )}
             </View>
-            <Image 
-              source={
-                primaryPet?.avatar_url 
-                  ? { uri: primaryPet.avatar_url }
-                  : require('@/assets/images/login page icon.png')
-              } 
-              style={styles.dogAvatar} 
-              resizeMode="cover"
-            />
-            <View style={[styles.moodIndicator, { backgroundColor: moodDisplay.color }]}>
-              <Text style={styles.moodEmoji}>{moodDisplay.emoji}</Text>
+
+            <View style={styles.dogInfoSection}>
+              <Text style={styles.dogName}>{dogName}</Text>
+              <Text style={styles.dogBreed}>{dogBreed}</Text>
             </View>
           </View>
-          
-          <View style={styles.dogInfoSection}>
-            <Text style={styles.dogName}>{dogName}</Text>
-            <Text style={styles.dogBreed}>{dogBreed}</Text>
-            
-            {primaryPet ? (
-              <View style={styles.quickStats}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Age</Text>
-                  <Text style={styles.statValue}>{primaryPet.age || '?'}</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Gender</Text>
-                  <Text style={styles.statValue}>{primaryPet.gender || '?'}</Text>
-                </View>
-                <View style={styles.statDivider} />
-                <View style={styles.statItem}>
-                  <Text style={styles.statLabel}>Mood</Text>
-                  <Text style={styles.statValue}>{moodDisplay.label}</Text>
-                </View>
+
+          {/* Row 2: Age & Gender */}
+          {primaryPet ? (
+            <View style={styles.quickStats}>
+              <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Age</Text>
+                <Text style={styles.statValue}>{primaryPet.age || '?'}</Text>
               </View>
-            ) : (
-              <TouchableOpacity 
-                style={styles.addPetButton}
-                onPress={() => handleFeaturePress('add-pet')}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Text style={styles.addPetText}>+ Add Your Pet</Text>
-              </TouchableOpacity>
-            )}
-          </View>
+              <View style={styles.statDivider} />
+              <View style={styles.statItem}>
+                <Text style={styles.statLabel}>Gender</Text>
+                <Text style={styles.statValue}>{primaryPet.gender || '?'}</Text>
+              </View>
+            </View>
+          ) : (
+            <TouchableOpacity 
+              style={styles.addPetButton}
+              onPress={() => handleFeaturePress('add-pet')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.addPetText}>+ Add Your Pet</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Row 3: Mood Gauge full width */}
+          {latestMood && moodDisplay && (
+            <View style={styles.moodRow}>
+              <View style={styles.moodGaugeWrap}>
+                <MoodGauge
+                  score={getMoodScore(latestMood?.mood || 'happy', latestMood?.confidence)}
+                />
+              </View>
+              <View style={styles.moodInfo}>
+                <Text style={styles.moodTitle}>Latest Mood</Text>
+                <Text style={styles.moodHeadline}>{moodDisplay.emoji} {moodDisplay.label}</Text>
+                {!!(latestMood as any)?.advice && (
+                  <Text style={styles.moodSnippet} numberOfLines={2}>
+                    {(latestMood as any).advice}
+                  </Text>
+                )}
+                {!((latestMood as any)?.advice) && (latestMood as any)?.context && (
+                  <Text style={styles.moodSnippet} numberOfLines={2}>
+                    {(latestMood as any).context}
+                  </Text>
+                )}
+              </View>
+            </View>
+          )}
         </View>
 
         {/* Features Grid */}
@@ -366,8 +409,17 @@ export default function HomeScreen() {
                   </View>
                   <View style={styles.heroTextContainer}>
                     <Text style={styles.heroTitle}>Live Mentor</Text>
-                    <Text style={styles.heroSubtext}>Get real-time dog mentorship (4-5 min)</Text>
-                    <Text style={styles.heroDescription}>Talk to Luna, our expert dog mentor!</Text>
+                    <Text style={styles.heroSubtext} numberOfLines={1}>
+                      Real-time guidance (4–5 min)
+                    </Text>
+                    <View style={styles.heroMetaRow}>
+                      <View style={[styles.metaPill, styles.metaPillPrimary]}>
+                        <Text style={styles.metaPillText}>AI Mentor</Text>
+                      </View>
+                      <View style={styles.metaPill}>
+                        <Text style={styles.metaPillText}>4–5 min</Text>
+                      </View>
+                    </View>
                   </View>
                 </View>
                 <TouchableOpacity 
@@ -387,7 +439,7 @@ export default function HomeScreen() {
               style={styles.featureCard}
               onPress={() => handleFeaturePress('health-checker')}
               hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              accessibilityLabel="Symptom Checker: Check your dog's health symptoms"
+              accessibilityLabel="SymptoGuide: Check your dog's health symptoms"
               accessibilityRole="button"
             >
               <View style={styles.featureContent}>
@@ -396,7 +448,7 @@ export default function HomeScreen() {
                   style={styles.featureIcon}
                   resizeMode="contain"
                 />
-                <Text style={styles.featureText}>Symptom{'\n'}Checker</Text>
+                <Text style={styles.featureText}>Sympto{'\n'}Guide</Text>
               </View>
             </TouchableOpacity>
 
@@ -614,13 +666,13 @@ const styles = StyleSheet.create({
   welcomeText: {
     fontSize: 24,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: 2,
   },
   welcomeSubtext: {
     fontSize: 14,
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     opacity: 0.8,
   },
   pawIcon: {
@@ -629,21 +681,27 @@ const styles = StyleSheet.create({
   },
   // Enhanced Dog Profile Widget
   dogProfileWidget: {
-    backgroundColor: '#fff4bb',
+    backgroundColor: Colors.white,
     marginHorizontal: responsiveWidth(5),
     marginBottom: responsiveHeight(3),
     borderRadius: responsiveWidth(6),
     padding: responsiveWidth(5),
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: 'column',
+    alignItems: 'stretch',
     shadowColor: 'transparent',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0,
     shadowRadius: 0,
     elevation: 0,
-    borderWidth: 2,
-    borderColor: '#D7B899',
+    borderWidth: 0,
+    borderColor: 'transparent',
     minHeight: responsiveHeight(12),
+  },
+  dogHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    width: '100%',
   },
   dogAvatarContainer: {
     position: 'relative',
@@ -651,48 +709,48 @@ const styles = StyleSheet.create({
   },
   progressRing: {
     position: 'absolute',
-    top: -responsiveWidth(1.5),
-    left: -responsiveWidth(1.5),
+    top: -responsiveWidth(1.2),
+    left: -responsiveWidth(1.2),
     width: responsiveWidth(23),
     height: responsiveWidth(23),
     borderRadius: responsiveWidth(11.5),
-    borderWidth: 0,
-    borderColor: 'transparent',
+    borderWidth: 3,
+    borderColor: Colors.primary + '33',
     overflow: 'hidden',
   },
   progressFill: {
     position: 'absolute',
     top: 0,
     left: 0,
-    width: '50%',
+    width: '0%',
     height: '100%',
-    backgroundColor: '#4CAF50',
+    backgroundColor: Colors.primary,
     transformOrigin: 'right center',
   },
   dogAvatar: {
     width: responsiveWidth(20),
     height: responsiveWidth(20),
     borderRadius: responsiveWidth(10),
-    borderWidth: 0,
-    borderColor: 'transparent',
-    shadowColor: 'transparent',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
+    borderWidth: 2,
+    borderColor: Colors.white,
+    shadowColor: Colors.text,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    elevation: 2,
   },
   moodIndicator: {
     position: 'absolute',
     bottom: -responsiveWidth(0.5),
     right: -responsiveWidth(0.5),
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#FFB300',
     borderRadius: responsiveWidth(3),
     width: responsiveWidth(6),
     height: responsiveWidth(6),
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 0,
-    borderColor: 'transparent',
+    borderWidth: 2,
+    borderColor: Colors.white,
   },
   moodEmoji: {
     fontSize: responsiveFontSize(12),
@@ -704,11 +762,11 @@ const styles = StyleSheet.create({
   quickStats: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: responsiveHeight(1),
-    backgroundColor: '#ffe98a',
+    marginTop: responsiveHeight(1.6),
+    backgroundColor: '#fff4bb',
     borderRadius: responsiveWidth(3),
     paddingHorizontal: responsiveWidth(3),
-    paddingVertical: responsiveHeight(1),
+    paddingVertical: responsiveHeight(1.2),
     minHeight: responsiveHeight(5),
   },
   statItem: {
@@ -719,7 +777,7 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: responsiveFontSize(10),
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     opacity: 0.7,
     textTransform: 'uppercase',
     textAlign: 'center',
@@ -728,7 +786,7 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.bold,
-    color: '#544c3a',
+    color: Colors.text,
     marginTop: responsiveHeight(0.3),
     textAlign: 'center',
     lineHeight: responsiveFontSize(16),
@@ -738,35 +796,73 @@ const styles = StyleSheet.create({
   statDivider: {
     width: 1,
     height: responsiveHeight(2.5),
-    backgroundColor: '#ffe8d6',
+    backgroundColor: Colors.border,
     marginHorizontal: responsiveWidth(2),
   },
   dogName: {
     fontSize: responsiveFontSize(20),
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: responsiveHeight(0.3),
     lineHeight: responsiveFontSize(24),
   },
   dogBreed: {
     fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: responsiveHeight(0.8),
     lineHeight: responsiveFontSize(16),
+  },
+  moodRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveWidth(3),
+    marginTop: responsiveHeight(1.2),
+    width: '100%',
+  },
+  moodGaugeWrap: {
+    flexBasis: responsiveWidth(48),
+  },
+  moodInfo: {
+    flex: 1,
+  },
+  moodTitle: {
+    fontSize: responsiveFontSize(12),
+    fontFamily: Fonts.body.bold,
+    color: Colors.text,
+    opacity: 0.7,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  moodHeadline: {
+    fontSize: responsiveFontSize(16),
+    fontFamily: Fonts.heading.bold,
+    color: Colors.text,
+    marginBottom: 2,
+  },
+  moodSnippet: {
+    fontSize: responsiveFontSize(12),
+    fontFamily: Fonts.body.regular,
+    color: Colors.text,
+    opacity: 0.8,
   },
   ownerName: {
     fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
+    color: Colors.text,
   },
   addPetButton: {
     marginTop: responsiveHeight(0.8),
     paddingVertical: responsiveHeight(1),
     paddingHorizontal: responsiveWidth(4),
-    backgroundColor: '#ff9d00',
+    backgroundColor: Colors.primary,
     borderRadius: responsiveWidth(3),
     alignSelf: 'flex-start',
+    shadowColor: Colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
   },
   addPetText: {
     fontSize: responsiveFontSize(12),
@@ -868,7 +964,7 @@ const styles = StyleSheet.create({
   featureText: {
     fontSize: 13,
     fontFamily: Fonts.body.bold,
-    color: '#544c3a',
+    color: Colors.text,
     flex: 1,
     lineHeight: 16,
   },
@@ -896,7 +992,7 @@ const styles = StyleSheet.create({
   dailyTipsTitle: {
     fontSize: 18,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
   },
   tipSliderContainer: {
     paddingLeft: 20,
@@ -908,7 +1004,7 @@ const styles = StyleSheet.create({
   tipsSubtitle: {
     fontSize: 12,
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     opacity: 0.7,
     marginTop: 2,
   },
@@ -927,7 +1023,7 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 14,
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     marginTop: 10,
   },
   tipsErrorContainer: {
@@ -949,13 +1045,13 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 14,
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: 4,
   },
   errorSubtext: {
     fontSize: 12,
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
+    color: Colors.text,
     opacity: 0.7,
   },
   retryButton: {
@@ -1007,7 +1103,7 @@ const styles = StyleSheet.create({
   tipCategory: {
     fontSize: 9,
     fontFamily: Fonts.body.bold,
-    color: '#544c3a',
+    color: Colors.text,
     textTransform: 'uppercase',
     marginLeft: 4,
     letterSpacing: 0.5,
@@ -1015,7 +1111,7 @@ const styles = StyleSheet.create({
   tipText: {
     fontSize: 15,
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     lineHeight: 22,
     marginBottom: 6,
     flexWrap: 'wrap',
@@ -1024,7 +1120,7 @@ const styles = StyleSheet.create({
   tipSubtext: {
     fontSize: 10,
     fontFamily: Fonts.body.medium,
-    color: '#544c3a',
+    color: Colors.text,
     opacity: 0.8,
     fontStyle: 'italic',
   },
@@ -1099,30 +1195,66 @@ const styles = StyleSheet.create({
   heroTextContainer: {
     flex: 1,
     marginRight: 8, // Space from button
+    maxWidth: width - 220, // keep text within card so it doesn't overlap CTA
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    flexWrap: 'wrap',
+  },
+  metaPill: {
+    backgroundColor: '#FFE7B3',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#F1C97A',
+  },
+  metaPillPrimary: {
+    backgroundColor: '#ff9d00',
+    borderColor: '#ff9d00',
+  },
+  metaPillText: {
+    fontSize: 10,
+    fontFamily: Fonts.body.bold,
+    color: Colors.text,
+  },
+  heroTrustRow: {
+    marginTop: 6,
+  },
+  heroTrustText: {
+    fontSize: 10,
+    fontFamily: Fonts.body.medium,
+    color: Colors.text,
+    opacity: 0.7,
   },
   heroTitle: {
-    fontSize: 16, // Slightly smaller for better fit
+    fontSize: responsiveFontSize(16), // Slightly smaller for better fit
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a', // VetPaw brown for consistency
-    marginBottom: 3,
+    color: Colors.text, // VetPaw brown for consistency
+    marginBottom: responsiveHeight(0.3),
     flexWrap: 'wrap',
   },
   heroSubtext: {
-    fontSize: 11, // Adjusted for mobile
+    fontSize: responsiveFontSize(11), // Adjusted for mobile
     fontFamily: Fonts.body.medium,
-    color: '#544c3a', // VetPaw brown for consistency
+    color: Colors.text, // VetPaw brown for consistency
     opacity: 0.8,
-    marginBottom: 2,
+    marginBottom: responsiveHeight(0.2),
     flexWrap: 'wrap',
-    lineHeight: 14,
+    lineHeight: responsiveFontSize(14),
+    maxWidth: width * 0.52,
   },
   heroDescription: {
-    fontSize: 9, // Smaller for mobile screens
+    fontSize: responsiveFontSize(9), // Smaller for mobile screens
     fontFamily: Fonts.body.regular,
-    color: '#544c3a', // VetPaw brown for consistency
+    color: Colors.text, // VetPaw brown for consistency
     opacity: 0.7,
     flexWrap: 'wrap',
-    lineHeight: 12,
+    lineHeight: responsiveFontSize(12),
+    maxWidth: width * 0.56,
   },
   heroButton: {
     backgroundColor: '#ff9d00', // Primary CTA color
@@ -1141,7 +1273,7 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   heroButtonText: {
-    fontSize: 13, // Slightly larger for CTA
+    fontSize: responsiveFontSize(13), // Slightly larger for CTA
     fontFamily: Fonts.body.bold,
     color: Colors.white,
     textAlign: 'center',
@@ -1196,7 +1328,7 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontFamily: Fonts.heading.bold,
-    color: '#47463e',
+    color: Colors.text,
   },
   closeButton: {
     width: 30,
@@ -1208,7 +1340,7 @@ const styles = StyleSheet.create({
   },
   closeButtonText: {
     fontSize: 16,
-    color: '#47463e',
+    color: Colors.text,
     fontFamily: Fonts.body.bold,
   },
   milestonesList: {
@@ -1220,7 +1352,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    shadowColor: '#47463e',
+    shadowColor: Colors.text,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
@@ -1244,13 +1376,13 @@ const styles = StyleSheet.create({
   milestoneTitle: {
     fontSize: 16,
     fontFamily: Fonts.body.bold,
-    color: '#47463e',
+    color: Colors.text,
     marginBottom: 4,
   },
   milestoneMessage: {
     fontSize: 14,
     fontFamily: Fonts.body.regular,
-    color: '#47463e',
+    color: Colors.text,
     marginBottom: 4,
     lineHeight: 20,
   },
@@ -1289,7 +1421,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#e6d69a',
-    shadowColor: '#47463e',
+    shadowColor: Colors.text,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,

@@ -20,6 +20,7 @@ import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { Button } from '@/components/ui/Button';
 import { supabase } from '@/lib/supabase';
+import { PET_IMAGE_BUCKET, PET_IMAGE_PREFIX } from '@/constants/Storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Badge checking functionality for pets
@@ -124,12 +125,29 @@ export default function AddPetScreen() {
         gender: petData.gender
       });
 
+      let uploadedUrl: string | undefined = undefined;
+      if (selectedImage) {
+        const bucket = PET_IMAGE_BUCKET; // e.g., 'public' or your actual bucket
+        const keyPrefix = `${PET_IMAGE_PREFIX}/${user?.id || 'anonymous'}`;
+        const result = await MediaUtils.uploadImageToSupabase(bucket, keyPrefix, selectedImage);
+        if (!result.error && result.publicUrl) {
+          showSuccess('Image uploaded successfully.');
+        }
+        if (result.error) {
+          console.warn('Upload error:', result.error);
+          showError('Failed to upload image. Please try again.');
+          } else {
+          uploadedUrl = result.publicUrl || undefined;
+          console.log('✅ Image uploaded. Public URL:', uploadedUrl);
+        }
+      }
+
       const { data, error } = await createPet({
         name: petData.name.trim(),
         breed: petData.breed.trim() || 'Mixed Breed',
         age: Number(petData.age),
         gender: petData.gender,
-        avatar_url: selectedImage || undefined,
+        avatar_url: uploadedUrl,
       });
 
       console.log('🐕 Pet creation result:', { data, error });

@@ -357,6 +357,10 @@ export default function CoachIntroScreen() {
             loading={isLoading}
           />
           
+          <Card variant="outlined" style={styles.disclaimerCard}>
+            <Text style={styles.disclaimerTitle}>Important</Text>
+            <Text style={styles.disclaimerBody}>For informational use only — not a veterinary diagnosis. Consult a vet for medical advice.</Text>
+          </Card>
           <Text style={styles.disclaimerText}>
             {hasPermissions 
               ? `💡 Ready to start! Luna will provide real-time guidance for ${selectedPet.name}.`
@@ -405,7 +409,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
   },
   headerRight: {
     width: 40,
@@ -521,10 +525,10 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontFamily: Fonts.heading.semiBold,
-    color: '#544c3a',
-    marginBottom: 16,
+    fontSize: 20,
+    fontFamily: Fonts.heading.bold,
+    color: Colors.text,
+    marginBottom: 4,
   },
   petInfo: {
     flexDirection: 'row',
@@ -655,6 +659,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Fonts.body.regular,
     color: '#7a6f5d',
+    textAlign: 'center',
+    lineHeight: 16,
+  },
+  disclaimerCard: {
+    marginBottom: 12,
+    borderColor: '#ff9d00',
+    backgroundColor: '#fff4bb',
+  },
+  disclaimerTitle: {
+    fontSize: 12,
+    fontFamily: Fonts.body.bold,
+    color: '#544c3a',
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  disclaimerBody: {
+    fontSize: 12,
+    fontFamily: Fonts.body.regular,
+    color: '#544c3a',
     textAlign: 'center',
     lineHeight: 16,
   },

@@ -46,25 +46,21 @@ class ApiKeysService {
 
   // Get fallback keys from environment variables
   private getFallbackKeys(): ApiKeys {
+    // Per requirement: Do NOT use env for external AI keys. Only RevenueCat can be hardcoded from env.
     const fallbackKeys = {
-      GEMINI_API_KEY: process.env.EXPO_PUBLIC_GEMINI_API_KEY || '',
-      OPENAI_API_KEY: process.env.EXPO_PUBLIC_OPENAI_API_KEY || '',
-      ELEVENLABS_API_KEY: process.env.EXPO_PUBLIC_ELEVENLABS_API_KEY || '',
-      TAVUS_API_KEY: process.env.EXPO_PUBLIC_TAVUS_API_KEY || '',
-      TAVUS_PERSONA_ID: process.env.EXPO_PUBLIC_TAVUS_PERSONA_ID || 'james-vet-coach',
-      TAVUS_REPLICA_ID: process.env.EXPO_PUBLIC_TAVUS_REPLICA_ID || 'james-vet-coach',
+      GEMINI_API_KEY: '',
+      OPENAI_API_KEY: '',
+      ELEVENLABS_API_KEY: '',
+      TAVUS_API_KEY: '',
+      TAVUS_PERSONA_ID: '',
+      TAVUS_REPLICA_ID: '',
       REVENUECAT_APPLE_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_APPLE_API_KEY || '',
       REVENUECAT_GOOGLE_API_KEY: process.env.EXPO_PUBLIC_REVENUECAT_GOOGLE_API_KEY || '',
       GOOGLE_OAUTH_CLIENT_ID: process.env.EXPO_PUBLIC_GOOGLE_CLIENT_ID || '272010092004-la0167jf3d6o7f7g6hc50961ll7m7ujr.apps.googleusercontent.com',
       GOOGLE_OAUTH_REDIRECT_URI: process.env.EXPO_PUBLIC_GOOGLE_REDIRECT_URI || 'vetpaw://auth/callback',
       WEBHOOK_SECRET: '',
-    };
-    
-    // Log fallback RevenueCat keys for debugging
-    console.log('📦 Using Fallback RevenueCat Keys:');
-    console.log(`  🍎 Apple (env): ${fallbackKeys.REVENUECAT_APPLE_API_KEY ? fallbackKeys.REVENUECAT_APPLE_API_KEY.substring(0, 15) + '...' : 'NOT SET'}`);
-    console.log(`  🤖 Google (env): ${fallbackKeys.REVENUECAT_GOOGLE_API_KEY ? fallbackKeys.REVENUECAT_GOOGLE_API_KEY.substring(0, 15) + '...' : 'NOT SET'}`);
-    
+    } as ApiKeys;
+
     return fallbackKeys;
   }
 
@@ -122,32 +118,22 @@ class ApiKeysService {
       console.log('- Session user:', session?.user?.email);
       console.log('- Token expires:', session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : 'unknown');
       
-      if (!session || sessionError) {
-        console.warn('⚠️ No active session, using fallback API keys');
-        return this.getFallbackKeys();
-      }
+      // Try invoke even if session is missing (function may allow anon); otherwise fall back to RC-only env
 
-      const url = `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/api-keys`;
-      console.log('🌐 Fetching from:', url);
-      console.log('🔐 Token preview:', session.access_token.substring(0, 20) + '...');
-
-      const response = await fetch(url, {
-        method: 'GET',
+      // Use existing Supabase client to invoke edge function with auth
+      const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+      const { data: result, error: invokeError } = await supabase.functions.invoke('api-keys', {
+        // Default method is POST; include auth headers explicitly
         headers: {
-          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
+          ...(session?.access_token ? { 'Authorization': `Bearer ${session.access_token}` } : {}),
+          ...(anonKey ? { apikey: anonKey } : {}),
         },
-      });
+      }) as { data: ApiKeysResponse | null; error: any };
 
-      console.log('📥 Response status:', response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Edge function error response:', errorText);
-        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      if (invokeError || !result) {
+        throw new Error(invokeError?.message || 'Invoke failed');
       }
-
-      const result: ApiKeysResponse = await response.json();
 
       if (!result.success || !result.keys) {
         throw new Error(result.error || 'Failed to fetch API keys');
@@ -166,7 +152,6 @@ class ApiKeysService {
 
     } catch (error) {
       console.error('Failed to fetch API keys from server:', error);
-      console.log('🔄 Falling back to environment variables');
       return this.getFallbackKeys();
     }
   }

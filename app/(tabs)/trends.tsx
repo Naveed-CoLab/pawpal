@@ -33,7 +33,7 @@ export default function TrendsScreen() {
   const [trendData, setTrendData] = useState<BehaviorTrendData | null>(null);
 
   // Get primary pet or first pet
-  const primaryPet = pets.find(p => p.is_primary) || pets[0];
+  const primaryPet = pets[0];
   const currentPetId = selectedPetId || primaryPet?.id;
   const currentPet = pets.find(p => p.id === currentPetId);
 
@@ -76,7 +76,7 @@ export default function TrendsScreen() {
       'About Behavior Trends',
       'This graph shows your pet\'s behavior patterns over time by combining:\n\n' +
       '• Mood analysis from Snap My Mood photos\n' +
-      '• Health assessments from symptom checker\n\n' +
+      '• Health assessments from SymptoGuide\n\n' +
       'Higher scores indicate better mood and health. Use this to track your pet\'s wellbeing and identify patterns.',
       [{ text: 'Got it!' }]
     );
@@ -85,28 +85,28 @@ export default function TrendsScreen() {
   // Show loading state while auth is initializing OR while pets are loading
   if (isLoading || petsLoading) {
     return (
-      <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: Colors.background }]}>
         <Text style={styles.loadingText}>
           {isLoading ? 'Checking authentication...' : 'Loading pets...'}
         </Text>
-      </LinearGradient>
+      </View>
     );
   }
 
   // Only show "sign in" message after auth has finished loading and no user found
   if (!user) {
     return (
-      <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.errorContainer}>
+      <View style={[styles.errorContainer, { backgroundColor: Colors.background }]}>
         <Text style={styles.errorTitle}>Please sign in</Text>
         <Text style={styles.errorText}>You need to be signed in to view behavior trends.</Text>
-      </LinearGradient>
+      </View>
     );
   }
 
   if (pets.length === 0) {
     return (
-      <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.emptyContainer}>
-        <Heart size={60} color="#ffcc80" />
+      <View style={[styles.emptyContainer, { backgroundColor: Colors.background }]}>
+        <Heart size={60} color={Colors.primary} />
         <Text style={styles.emptyTitle}>No Pets Found</Text>
         <Text style={styles.emptySubtitle}>
           Add your pet to start tracking their behavior trends
@@ -115,26 +115,23 @@ export default function TrendsScreen() {
           style={styles.addPetButton}
           onPress={() => router.push('/pets/add')}
         >
-          <Plus size={20} color="#fff8e1" />
+          <Plus size={20} color={Colors.background} />
           <Text style={styles.addPetButtonText}>Add Your Pet</Text>
         </TouchableOpacity>
-      </LinearGradient>
+      </View>
     );
   }
 
   return (
     <View style={styles.container}>
       {/* Header */}
-      <LinearGradient
-        colors={['#fff8e1', '#fff8e1']}
-        style={styles.header}
-      >
+      <View style={styles.header}>
         <View style={styles.headerContent}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
           >
-            <ArrowLeft size={24} color="#47463e" />
+            <ArrowLeft size={24} color={Colors.text} />
           </TouchableOpacity>
           
           <View style={styles.headerCenter}>
@@ -148,7 +145,7 @@ export default function TrendsScreen() {
             style={styles.infoButton}
             onPress={handleInfoPress}
           >
-            <Info size={20} color="#ff9d00" />
+            <Info size={20} color={Colors.primary} />
           </TouchableOpacity>
         </View>
 
@@ -179,7 +176,7 @@ export default function TrendsScreen() {
             ))}
           </ScrollView>
         )}
-      </LinearGradient>
+      </View>
 
       {/* Main Content */}
       <View style={styles.content}>
@@ -191,16 +188,16 @@ export default function TrendsScreen() {
             hideHeader={true}
           />
         ) : (
-          <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.noPetContainer}>
-            <Activity size={40} color="#ffcc80" />
+          <View style={[styles.noPetContainer, { backgroundColor: Colors.background }]}>
+            <Activity size={40} color={Colors.primary} />
             <Text style={styles.noPetText}>Select a pet to view trends</Text>
-          </LinearGradient>
+          </View>
         )}
       </View>
 
       {/* Quick Actions */}
-      {trendData?.insights.totalEntries === 0 && (
-        <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.quickActions}>
+      {trendData?.insights?.totalEntries === 0 && (
+        <View style={[styles.quickActions, { backgroundColor: Colors.background }]}>
           <Text style={styles.quickActionsTitle}>Get Started</Text>
           <Text style={styles.quickActionsSubtitle}>
             Add some behavior data to see your pet's trends
@@ -211,7 +208,7 @@ export default function TrendsScreen() {
               style={[styles.actionButton, styles.moodButton]}
               onPress={() => router.push('/(tabs)/mood')}
             >
-              <Brain size={20} color="#fff8e1" />
+              <Brain size={20} color={Colors.background} />
               <Text style={styles.actionButtonText}>Snap My Mood</Text>
             </TouchableOpacity>
             
@@ -219,20 +216,20 @@ export default function TrendsScreen() {
               style={[styles.actionButton, styles.healthButton]}
               onPress={() => router.push('/(tabs)/health')}
             >
-              <Heart size={20} color="#fff8e1" />
+              <Heart size={20} color={Colors.background} />
               <Text style={styles.actionButtonText}>Health Check</Text>
             </TouchableOpacity>
           </View>
-        </LinearGradient>
+        </View>
       )}
 
       {/* Floating Add Button */}
-      {trendData?.insights.totalEntries > 0 && (
+      {trendData?.insights?.totalEntries && trendData.insights.totalEntries > 0 && (
         <TouchableOpacity
           style={styles.fabButton}
           onPress={handleAddData}
         >
-          <Plus size={24} color="#fff8e1" />
+          <Plus size={24} color={Colors.background} />
         </TouchableOpacity>
       )}
     </View>
@@ -242,7 +239,7 @@ export default function TrendsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff8e1',
+    backgroundColor: Colors.background,
   },
   loadingContainer: {
     flex: 1,
@@ -252,7 +249,7 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     fontFamily: Fonts.body.regular,
-    color: '#47463e',
+    color: Colors.text,
   },
   errorContainer: {
     flex: 1,
@@ -263,13 +260,13 @@ const styles = StyleSheet.create({
   errorTitle: {
     fontSize: 20,
     fontFamily: Fonts.heading.bold,
-    color: '#47463e',
+    color: Colors.text,
     marginBottom: 8,
   },
   errorText: {
     fontSize: 14,
     fontFamily: Fonts.body.regular,
-    color: '#47463e',
+    color: Colors.text,
     textAlign: 'center',
   },
   emptyContainer: {
@@ -281,14 +278,14 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 24,
     fontFamily: Fonts.heading.bold,
-    color: '#47463e',
+    color: Colors.text,
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 16,
     fontFamily: Fonts.body.regular,
-    color: '#47463e',
+    color: Colors.text,
     textAlign: 'center',
     marginBottom: 24,
     lineHeight: 22,
@@ -296,7 +293,7 @@ const styles = StyleSheet.create({
   addPetButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#ff9d00',
+    backgroundColor: Colors.primary,
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 25,
@@ -310,7 +307,7 @@ const styles = StyleSheet.create({
   addPetButtonText: {
     fontSize: 16,
     fontFamily: Fonts.body.semiBold,
-    color: '#fff8e1',
+    color: Colors.background,
   },
   header: {
     paddingTop: 50,
@@ -327,14 +324,10 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#ffecb3',
+    backgroundColor: Colors.secondary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#8d6e63',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    elevation: 0,
   },
   headerCenter: {
     flex: 1,
@@ -343,26 +336,22 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontFamily: Fonts.heading.bold,
-    color: '#47463e',
+    color: Colors.text,
   },
   headerSubtitle: {
     fontSize: 14,
     fontFamily: Fonts.body.regular,
-    color: '#47463e',
+    color: Colors.text,
     marginTop: 2,
   },
   infoButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#ffecb3',
+    backgroundColor: Colors.secondary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#8d6e63',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    elevation: 0,
   },
   petSelector: {
     marginTop: 10,
@@ -375,21 +364,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    backgroundColor: '#ffecb3',
+    backgroundColor: Colors.secondary,
     borderWidth: 1,
-    borderColor: '#ffe0b2',
+    borderColor: Colors.border,
   },
   petChipActive: {
-    backgroundColor: '#ff9d00',
-    borderColor: '#ff9d00',
+    backgroundColor: Colors.primary,
+    borderColor: Colors.primary,
   },
   petChipText: {
     fontSize: 14,
     fontFamily: Fonts.body.medium,
-    color: '#47463e',
+    color: Colors.text,
   },
   petChipTextActive: {
-    color: '#fff8e1',
+    color: Colors.background,
   },
   content: {
     flex: 1,
@@ -403,30 +392,26 @@ const styles = StyleSheet.create({
   noPetText: {
     fontSize: 16,
     fontFamily: Fonts.body.regular,
-    color: '#47463e',
+    color: Colors.text,
     marginTop: 12,
   },
   quickActions: {
     padding: 20,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    shadowColor: '#8d6e63',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 8,
+    elevation: 0,
   },
   quickActionsTitle: {
     fontSize: 18,
     fontFamily: Fonts.heading.bold,
-    color: '#47463e',
+    color: Colors.text,
     textAlign: 'center',
     marginBottom: 4,
   },
   quickActionsSubtitle: {
     fontSize: 14,
     fontFamily: Fonts.body.regular,
-    color: '#47463e',
+    color: Colors.text,
     textAlign: 'center',
     marginBottom: 20,
   },
@@ -445,15 +430,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   moodButton: {
-    backgroundColor: '#ff9d00',
+    backgroundColor: Colors.primary,
   },
   healthButton: {
-    backgroundColor: '#66bb6a',
+    backgroundColor: '#ffb74d',
   },
   actionButtonText: {
     fontSize: 14,
     fontFamily: Fonts.body.semiBold,
-    color: '#fff8e1',
+    color: Colors.background,
   },
   fabButton: {
     position: 'absolute',
@@ -462,13 +447,9 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#ff9d00',
+    backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#8d6e63',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    elevation: 0,
   },
 }); 

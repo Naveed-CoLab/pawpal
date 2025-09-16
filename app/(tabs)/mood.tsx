@@ -264,7 +264,7 @@ export default function MoodScreen() {
         <>
           <View style={styles.header}>
             <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-              <ArrowLeft size={24} color="#544c3a" />
+              <ArrowLeft size={24} color={Colors.text} />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Snap My Mood</Text>
             <View style={styles.placeholder} />
@@ -396,7 +396,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 20,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
   },
   placeholder: {
     width: 40,

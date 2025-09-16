@@ -15,7 +15,6 @@ import Animated, {
   withSequence,
   withDelay,
 } from 'react-native-reanimated';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { WifiOff, RefreshCw, Settings, AlertTriangle } from 'lucide-react-native';
@@ -161,31 +160,13 @@ export function NetworkErrorSnackbar({
   return (
     <Animated.View style={[styles.container, animatedStyle]}>
       <View style={styles.snackbar}>
-        {/* Beautiful gradient background */}
-        <LinearGradient
-          colors={['#fff8e1', '#ffecb3', '#fff0b3']}
-          style={styles.gradientBackground}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        />
-        
-        {/* Border gradient */}
-        <View style={styles.borderContainer}>
-          <LinearGradient
-            colors={['#2196F3', '#1976D2', '#0D47A1']}
-            style={styles.borderGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          />
-        </View>
-
         <View style={styles.content}>
           {/* Icon Section */}
           <View style={styles.iconSection}>
             <Animated.View style={[styles.iconContainer, iconAnimatedStyle]}>
               <WifiOff size={28} color="#2196F3" />
             </Animated.View>
-            <View style={styles.iconBackground} />
+            {/* no decorative background for minimal UI */}
           </View>
 
           {/* Text Section */}
@@ -218,9 +199,7 @@ export function NetworkErrorSnackbar({
           </View>
         </View>
 
-        {/* Decorative elements */}
-        <View style={styles.decorativeCircle1} />
-        <View style={styles.decorativeCircle2} />
+        {/* minimal UI: no decorative circles */}
       </View>
     </Animated.View>
   );
@@ -235,34 +214,19 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   snackbar: {
-    borderRadius: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 12,
-    overflow: 'hidden',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
     position: 'relative',
-    minHeight: 120,
-  },
-  gradientBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  borderContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 3,
-  },
-  borderGradient: {
-    flex: 1,
+    minHeight: 0,
+    backgroundColor: '#E9F4FF',
+    borderWidth: 1,
+    borderColor: '#9ED1FF',
   },
   content: {
     position: 'relative',
@@ -270,107 +234,68 @@ const styles = StyleSheet.create({
   },
   iconSection: {
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
     position: 'relative',
   },
   iconContainer: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#fff8e1',
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#E9F4FF',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#2196F3',
-    shadowColor: '#2196F3',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-    zIndex: 2,
-  },
-  iconBackground: {
-    position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#e3f2fd',
-    opacity: 0.3,
-    top: -12,
+    borderWidth: 1,
+    borderColor: '#9ED1FF',
+    zIndex: 1,
   },
   textSection: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 10,
   },
   title: {
-    fontSize: 18,
+    fontSize: 13,
     fontFamily: Fonts.heading.bold,
-    color: '#47463e',
+    color: '#0A3D62',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   message: {
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: Fonts.body.regular,
-    color: '#47463e',
+    color: '#0A3D62',
     textAlign: 'center',
-    lineHeight: 20,
-    paddingHorizontal: 8,
+    lineHeight: 16,
+    paddingHorizontal: 4,
   },
   actionSection: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: 12,
+    gap: 8,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 20,
-    gap: 8,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 6,
-    elevation: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    gap: 6,
   },
   primaryButton: {
     backgroundColor: '#2196F3',
   },
   secondaryButton: {
-    backgroundColor: '#ffecb3',
-    borderWidth: 2,
-    borderColor: '#ffe0b2',
+    backgroundColor: '#E9F4FF',
+    borderWidth: 1,
+    borderColor: '#9ED1FF',
   },
   primaryButtonText: {
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: Fonts.body.bold,
     color: '#fff8e1',
   },
   secondaryButtonText: {
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: Fonts.body.bold,
-    color: '#47463e',
-  },
-  decorativeCircle1: {
-    position: 'absolute',
-    top: -20,
-    right: -20,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#e3f2fd',
-    opacity: 0.2,
-  },
-  decorativeCircle2: {
-    position: 'absolute',
-    bottom: -15,
-    left: -15,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#fff4bb',
-    opacity: 0.3,
+    color: '#0A3D62',
   },
 }); 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,12 +10,14 @@ import {
   Alert,
   ActivityIndicator,
   FlatList,
+  Animated,
 } from 'react-native';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useUserBadges, usePets } from '@/hooks/useDatabase';
 import { useRevenueCat } from '@/hooks/useRevenueCat';
+import { useMoodLogs } from '@/hooks/useMoodLogs';
+import { useDailyActivity } from '@/hooks/useDailyActivity';
 import { useSubscriptionStatus } from '@/hooks/useSubscriptionStatus';
 import { PaywallButton } from '@/components/ui/PaywallButton';
 import { PetCard } from '@/components/ui/PetCard';
@@ -70,6 +72,43 @@ export default function ProfileScreen() {
   const { pets, loading: petsLoading, deletePet, refetch } = usePets();
   const [signingOut, setSigningOut] = useState(false);
   const [activeTab, setActiveTab] = useState<'user' | 'pets'>('user');
+  const { moodLogs } = useMoodLogs();
+  const activity = useDailyActivity(user?.id);
+  // Removed Lottie and switched to lightweight animated emoji/GIF approach
+
+  // No Lottie initialization required
+
+  // Animated emoji/GIF
+  const flameScale = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(flameScale, { toValue: 1.15, duration: 500, useNativeDriver: true }),
+        Animated.timing(flameScale, { toValue: 1.0, duration: 500, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => { loop.stop(); };
+  }, [flameScale]);
+
+  // Compute current streak and this week's completion map from aggregated daily activity
+  const logDateSet = activity.dates;
+  const currentStreak = activity.currentStreak;
+
+  const weekDays = useMemo(() => {
+    const labels = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+    const result: { label: string; filled: boolean; isToday: boolean }[] = [];
+    const today = new Date();
+    const start = new Date(today);
+    start.setDate(today.getDate() - today.getDay());
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      const key = d.toISOString().split('T')[0];
+      result.push({ label: labels[i], filled: logDateSet.has(key), isToday: i === today.getDay() });
+    }
+    return result;
+  }, [logDateSet]);
 
   // Debug auth state
   useEffect(() => {
@@ -142,7 +181,7 @@ export default function ProfileScreen() {
         handleSignOut();
         break;
       default:
-        router.push('/(tabs)/');
+        router.push('/');
         break;
     }
   };
@@ -307,6 +346,7 @@ export default function ProfileScreen() {
           {/* User Info */}
           <Text style={styles.userName}>{userName}</Text>
           <Text style={styles.userEmail}>{userEmail}</Text>
+          <Text style={styles.userTagline}>Caring for happy, healthy paws 🐾</Text>
           
           {/* Subscription Status Badge */}
           {!subscriptionLoading && (
@@ -339,9 +379,7 @@ export default function ProfileScreen() {
             onPress={() => setActiveTab('user')}
           >
             <User size={20} color={activeTab === 'user' ? Colors.white : Colors.text} />
-            <Text style={[styles.tabText, activeTab === 'user' && styles.activeTabText]}>
-              User Profile
-            </Text>
+            <Text style={[styles.tabText, activeTab === 'user' && styles.activeTabText]}>Overview</Text>
           </TouchableOpacity>
           
           <TouchableOpacity
@@ -349,15 +387,46 @@ export default function ProfileScreen() {
             onPress={() => setActiveTab('pets')}
           >
             <Heart size={20} color={activeTab === 'pets' ? Colors.white : Colors.text} />
-            <Text style={[styles.tabText, activeTab === 'pets' && styles.activeTabText]}>
-              My Pets ({pets.length})
-            </Text>
+            <Text style={[styles.tabText, activeTab === 'pets' && styles.activeTabText]}>Pets ({pets.length})</Text>
           </TouchableOpacity>
         </View>
 
         {/* Tab Content */}
         {activeTab === 'user' ? (
           <>
+            {/* Streak + Lottie */}
+            <Card variant="elevated" style={styles.streakCard}>
+              <View style={styles.streakHeader}>
+                <Animated.View style={{ transform: [{ scale: flameScale }], marginRight: 10 }}>
+                  <Image
+                    source={require('../../assets/images/Fire.gif')}
+                    style={styles.streakLottie}
+                    resizeMode="contain"
+                  />
+                </Animated.View>
+                <View style={styles.streakNumbers}>
+                  <Text style={styles.streakCount}>{currentStreak}</Text>
+                  <Text style={styles.streakLabel}>day streak</Text>
+                </View>
+              </View>
+              <View style={styles.streakWeekRow}>
+                {weekDays.map((d) => (
+                  <View key={d.label} style={styles.streakDay}>
+                    <Text style={styles.streakDayLabel}>{d.label}</Text>
+                    <View
+                      style={[
+                        styles.streakDot,
+                        d.filled ? styles.streakDotFilled : styles.streakDotIdle,
+                        d.isToday && d.filled && styles.streakDotToday,
+                      ]}
+                    >
+                      {d.filled && <Text style={styles.streakCheck}>✓</Text>}
+                    </View>
+                  </View>
+                ))}
+              </View>
+            </Card>
+
             {/* Engagement Stats Card */}
             <Card variant="elevated" style={styles.engagementStatsCard}>
               <Text style={styles.engagementStatsTitle}>Your VetPaw Journey</Text>
@@ -396,7 +465,7 @@ export default function ProfileScreen() {
                 disabled={isLoading || signingOut}
               >
                 <View style={styles.menuIconContainer}>
-                  <User size={20} color="#47463e" fill="#47463e" />
+                  <User size={20} color="#47463e" />
                 </View>
                 <Text style={styles.menuText}>Edit Profile</Text>
               </TouchableOpacity>
@@ -412,7 +481,7 @@ export default function ProfileScreen() {
                 disabled={isLoading || signingOut}
               >
                 <View style={styles.menuIconContainer}>
-                  <Bell size={20} color="#47463e" fill="#47463e" />
+                  <Bell size={20} color="#47463e" />
                 </View>
                 <Text style={styles.menuText}>Notification Preferences</Text>
               </TouchableOpacity>
@@ -429,7 +498,7 @@ export default function ProfileScreen() {
               >
                 <View style={styles.subscriptionMenuItem}>
                   <View style={styles.menuIconContainer}>
-                    <Crown size={20} color="#47463e" fill="#47463e" />
+                    <Crown size={20} color="#47463e" />
                   </View>
                   <View style={styles.subscriptionMenuContent}>
                     <Text style={styles.menuText}>Subscription</Text>
@@ -454,7 +523,7 @@ export default function ProfileScreen() {
                 disabled={isLoading || signingOut}
               >
                 <View style={styles.menuIconContainer}>
-                  <LogOut size={20} color="#47463e" fill="#47463e" />
+                  <LogOut size={20} color="#47463e" />
                 </View>
                 <Text style={[styles.menuText, { color: Colors.error }]}>
                   {signingOut ? 'Logging out...' : 'Logout'}
@@ -462,31 +531,7 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* User Stats Section */}
-            {badges.length > 0 && (
-              <View style={styles.badgesSection}>
-                <Text style={styles.badgesSectionTitle}>Your Achievements</Text>
-                <View style={styles.badgesGrid}>
-                  {badges.map((userBadge, index) => (
-                    <View key={index} style={styles.badgeItem}>
-                      {userBadge.badge.icon ? (
-                        <Text style={styles.badgeIconEmoji}>{userBadge.badge.icon}</Text>
-                      ) : (
-                        <Image
-                          source={{ uri: userBadge.badge.image_url }}
-                          style={styles.badgeIcon}
-                          resizeMode="contain"
-                        />
-                      )}
-                      <Text style={styles.badgeTitle}>{userBadge.badge.title}</Text>
-                      <Text style={styles.badgeDate}>
-                        {new Date(userBadge.earned_at).toLocaleDateString()}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-              </View>
-            )}
+            {/* Achievements removed per request */}
           </>
         ) : (
           /* Pet Profile Tab */
@@ -546,18 +591,19 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingTop: 60,
-    paddingBottom: 40,
+    paddingBottom: 32,
     paddingHorizontal: 24,
     alignItems: 'center',
     position: 'relative',
     backgroundColor: '#fff9e3', 
-
+    borderBottomWidth: 1,
+    borderColor: '#F1E4BF',
   },
   pawPrint: {
     position: 'absolute',
     fontSize: 16,
     opacity: 0.3,
-          color: '#544c3a', // VetPaw brown - consistent with brand
+          color: Colors.text, // VetPaw brown - consistent with brand
   },
   paw1: {
     top: 80,
@@ -633,15 +679,24 @@ const styles = StyleSheet.create({
   userName: {
     fontSize: 24,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: 4,
   },
   userEmail: {
     fontSize: 14,
     fontFamily: Fonts.body.regular,
-    color: '#544c3a',
+    color: Colors.text,
     opacity: 0.7,
     marginBottom: 12,
+  },
+  userTagline: {
+    fontSize: 12,
+    fontFamily: Fonts.body.medium,
+    color: '#7a6f5d',
+    backgroundColor: '#fff4bb',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
   },
   subscriptionStatus: {
     marginTop: 8,
@@ -649,7 +704,7 @@ const styles = StyleSheet.create({
   subscribedBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#e8f5e8',
+    backgroundColor: '#fff4bb',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
@@ -657,7 +712,7 @@ const styles = StyleSheet.create({
   subscribedText: {
     fontSize: 14,
     fontFamily: Fonts.body.semiBold,
-    color: '#28a745',
+    color: '#ff9d00',
     marginLeft: 6,
   },
   notSubscribedBadge: {
@@ -712,11 +767,13 @@ const styles = StyleSheet.create({
   menuIconContainer: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: '#f8f9fa', // Light gray background like reference
+    borderRadius: 10,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
+    borderWidth: 1,
+    borderColor: '#47463e',
   },
   menuEmoji: {
     fontSize: 20,
@@ -730,7 +787,7 @@ const styles = StyleSheet.create({
   menuText: {
     fontSize: 16,
     fontFamily: Fonts.body.bold,
-    color: '#544c3a',
+    color: Colors.text,
     flex: 1,
   },
   subscriptionMenuItem: {
@@ -762,10 +819,90 @@ const styles = StyleSheet.create({
     marginHorizontal: 24,
     marginTop: 32,
   },
+  streakCard: {
+    marginHorizontal: 24,
+    marginBottom: 16,
+    padding: 16,
+    backgroundColor: '#fffef6',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#F1E4BF',
+  },
+  streakHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  streakLottie: {
+    width: 48,
+    height: 48,
+    marginRight: 10,
+  },
+  streakEmoji: {
+    fontSize: 42,
+    marginRight: 10,
+  },
+  streakNumbers: {
+    alignItems: 'center',
+  },
+  streakCount: {
+    fontSize: 34,
+    fontFamily: Fonts.heading.bold,
+    color: '#ff9d00',
+    lineHeight: 36,
+  },
+  streakLabel: {
+    fontSize: 14,
+    fontFamily: Fonts.body.bold,
+    color: '#ff9d00',
+  },
+  streakWeekRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  streakDay: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  streakDayLabel: {
+    fontSize: 10,
+    fontFamily: Fonts.body.medium,
+    color: '#7a6f5d',
+    marginBottom: 6,
+  },
+  streakDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: '#ffb84d',
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  streakDotFilled: {
+    backgroundColor: '#ffb84d',
+    borderColor: '#ffb84d',
+  },
+  streakDotIdle: {
+    backgroundColor: '#fff',
+    borderColor: '#ffb84d',
+  },
+  streakDotToday: {
+    backgroundColor: '#00c0ff',
+    borderColor: '#00c0ff',
+  },
+  streakCheck: {
+    color: Colors.white,
+    fontSize: 12,
+    fontFamily: Fonts.body.bold,
+    lineHeight: 14,
+  },
   badgesSectionTitle: {
     fontSize: 20,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: 16,
   },
   badgesGrid: {
@@ -794,7 +931,7 @@ const styles = StyleSheet.create({
   badgeTitle: {
     fontSize: 12,
     fontFamily: Fonts.body.bold,
-    color: '#544c3a',
+    color: Colors.text,
     textAlign: 'center',
     marginBottom: 4,
   },
@@ -855,7 +992,7 @@ const styles = StyleSheet.create({
   tabText: {
     fontSize: 14,
     fontFamily: Fonts.body.semiBold,
-    color: '#544c3a',
+    color: Colors.text,
   },
   activeTabText: {
     color: Colors.white,
@@ -884,7 +1021,7 @@ const styles = StyleSheet.create({
   emptyPetsTitle: {
     fontSize: 24,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
     marginBottom: 8,
   },
   emptyPetsSubtitle: {
@@ -923,7 +1060,7 @@ const styles = StyleSheet.create({
   petsTitle: {
     fontSize: 20,
     fontFamily: Fonts.heading.bold,
-    color: '#544c3a',
+    color: Colors.text,
   },
   addPetIconButton: {
     width: 40,

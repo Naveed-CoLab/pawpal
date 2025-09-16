@@ -20,6 +20,8 @@ import { Pet } from '@/lib/database';
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { Button } from '@/components/ui/Button';
+import { supabase } from '@/lib/supabase';
+import { PET_IMAGE_BUCKET, PET_IMAGE_PREFIX } from '@/constants/Storage';
 
 export default function EditPetScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -111,12 +113,29 @@ export default function EditPetScreen() {
     setLoading(true);
     
     try {
+      let uploadedUrl: string | undefined = undefined;
+      if (selectedImage && selectedImage.startsWith('file')) {
+        const bucket = PET_IMAGE_BUCKET; // e.g., 'public' or your actual bucket
+        const keyPrefix = `${PET_IMAGE_PREFIX}/${currentPet.id}`;
+        const { publicUrl, error } = await MediaUtils.uploadImageToSupabase(bucket, keyPrefix, selectedImage);
+        if (!error) {
+          uploadedUrl = publicUrl || undefined;
+          console.log('✅ Image uploaded. Public URL:', uploadedUrl);
+          showSuccess('Image uploaded successfully.');
+        } else {
+          console.warn('Upload error:', error);
+          showError('Failed to upload image. Please try again.');
+        }
+      } else {
+        uploadedUrl = selectedImage || undefined;
+      }
+
       const updates = {
         name: petData.name.trim(),
         breed: petData.breed.trim() || 'Mixed Breed',
         age: Number(petData.age),
         gender: petData.gender,
-        avatar_url: selectedImage || undefined,
+        avatar_url: uploadedUrl,
       };
 
       const { data, error } = await updatePet(currentPet.id, updates);
@@ -138,7 +157,7 @@ export default function EditPetScreen() {
 
   if (!currentPet) {
     return (
-      <LinearGradient colors={Colors.backgroundGradient} style={styles.container}>
+      <LinearGradient colors={Colors.backgroundGradient as unknown as [string, string]} style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Colors.primary} />
           <Text style={styles.loadingText}>Loading pet information...</Text>
@@ -148,7 +167,7 @@ export default function EditPetScreen() {
   }
 
   return (
-    <LinearGradient colors={Colors.backgroundGradient} style={styles.container}>
+    <LinearGradient colors={Colors.backgroundGradient as unknown as [string, string]} style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}

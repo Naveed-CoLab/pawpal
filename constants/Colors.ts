@@ -1,7 +1,7 @@
 export const Colors = {
   // VetPaw Kawaii Color Palette
   background: '#fff9e5', // Creamy Vanilla
-  text: '#544c3a', // Cocoa Brown
+  text: '#111111', // Darker Black per request
   primary: '#ff9d00', // Vibrant Orange
   secondary: '#E3F2FD', // Light Blue Grey (removed pink)
   info: '#D0F0F7', // Sky Mist

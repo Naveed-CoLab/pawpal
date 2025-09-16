@@ -109,23 +109,23 @@ export function Snackbar({
     }
   };
 
-  const getBackgroundColors = () => {
+  const getStyleTone = () => {
     switch (type) {
       case 'success':
-        return ['#fff8e1', '#f4f7f0']; // Cream to light green
+        return { bg: '#E7F6EC', text: '#134E1C', border: '#7ADDA1' };
       case 'error':
-        return ['#fff8e1', '#fff0f0']; // Cream to light red
+        return { bg: '#FDECEC', text: '#7A0C0C', border: '#F5A3A3' };
       case 'warning':
-        return ['#fff8e1', '#fffaf0']; // Cream to light orange
+        return { bg: '#FFF6E5', text: '#7A5100', border: '#FFD694' };
       case 'network':
-        return ['#fff8e1', '#f0f8ff']; // Cream to light blue
+        return { bg: '#E9F4FF', text: '#0A3D62', border: '#9ED1FF' };
       case 'database':
-        return ['#fff8e1', '#f8f0ff']; // Cream to light purple
+        return { bg: '#F3E9FF', text: '#3D0A5E', border: '#CDB3F9' };
       case 'permission':
-        return ['#fff8e1', '#fff8f0']; // Cream to light pink
+        return { bg: '#FFF4EA', text: '#7A2E00', border: '#FFC9A6' };
       case 'info':
       default:
-        return ['#fff8e1', '#ffecb3']; // Default VetPaw cream gradient
+        return { bg: '#FFF9E8', text: '#5A4A22', border: '#FFE2A7' };
     }
   };
 
@@ -195,28 +195,18 @@ export function Snackbar({
 
   return (
     <Animated.View style={[styles.container, animatedStyle]}>
-      <View style={[
-        styles.snackbar, 
-        { 
-          borderColor: getBorderColor()
-        }
-      ]}>
-        {/* Gradient Background */}
-        <View style={styles.gradientContainer}>
-          <View style={[styles.gradientLayer, { backgroundColor: getBackgroundColors()[0] }]} />
-          <View style={[styles.gradientLayer, styles.gradientOverlay, { backgroundColor: getBackgroundColors()[1] }]} />
-        </View>
+      <View style={[styles.snackbar, { borderColor: getStyleTone().border, backgroundColor: getStyleTone().bg }]}>
         
         <View style={styles.content}>
           <View style={styles.leftSection}>
-            <View style={[styles.iconContainer, { borderColor: getBorderColor() }]}>
+            <View style={[styles.iconContainer, { borderColor: getStyleTone().border, backgroundColor: getStyleTone().bg }]}>
               {getIcon()}
             </View>
             <View style={styles.textContainer}>
-              <Text style={styles.title}>
+              <Text style={[styles.title, { color: getStyleTone().text }]}>
                 {getTitle()}
               </Text>
-              <Text style={styles.message} numberOfLines={3}>
+              <Text style={[styles.message, { color: getStyleTone().text }]} numberOfLines={3}>
                 {message}
               </Text>
             </View>
@@ -251,34 +241,16 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   snackbar: {
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
-    borderWidth: 2,
-    overflow: 'hidden',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+    borderWidth: 1,
     position: 'relative',
-  },
-  gradientContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  gradientLayer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  gradientOverlay: {
-    opacity: 0.3,
   },
   content: {
     flexDirection: 'row',
@@ -293,54 +265,41 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
-    backgroundColor: '#fff8e1',
-    borderWidth: 2,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
+    marginRight: 10,
+    borderWidth: 1,
   },
   textContainer: {
     flex: 1,
-    marginRight: 12,
+    marginRight: 8,
   },
   title: {
-    fontSize: 16,
+    fontSize: 13,
     fontFamily: Fonts.body.bold,
-    marginBottom: 4,
-    color: '#47463e',
+    marginBottom: 2,
   },
   message: {
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: Fonts.body.regular,
-    lineHeight: 20,
-    color: '#47463e',
+    lineHeight: 16,
   },
   actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 20,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
     gap: 6,
   },
   actionIcon: {
     marginRight: 2,
   },
   actionButtonText: {
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: Fonts.body.bold,
     color: '#fff8e1',
   },

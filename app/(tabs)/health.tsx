@@ -176,6 +176,7 @@ export default function HealthScreen() {
     
     try {
       // Get current user session for authentication
+      const { supabase } = await import('@/lib/supabase');
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       console.log('🔐 Health: Session debug info:');
@@ -192,30 +193,14 @@ export default function HealthScreen() {
       }
 
       console.log('📡 Health: Making request to ai-health edge function...');
-      console.log('🌐 URL:', `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ai-health`);
-      console.log('🔑 Auth header preview:', `Bearer ${session.access_token.substring(0, 20)}...`);
-
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/ai-health`, {
+      const { data, error } = await supabase.functions.invoke('ai-health', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          symptoms: symptoms,
-          userLocation: userLocation
-        }),
-      });
-
-      console.log('📥 Health: Received response from edge function, status:', response.status);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Health: Edge function error response:', errorText);
-        throw new Error(`Edge function error! status: ${response.status}, body: ${errorText}`);
+        body: { symptoms, userLocation },
+      }) as { data: any; error: any };
+      
+      if (error || !data) {
+        throw new Error(error?.message || 'Invoke failed');
       }
-
-      const data = await response.json();
       
       if (data.success && data.assessment) {
         console.log('✅ Health: Assessment received successfully from edge function');
@@ -370,7 +355,7 @@ export default function HealthScreen() {
     if (!subscriptionLoading && !isSubscribed && monthlyUsage >= FREE_MONTHLY_LIMIT) {
       Alert.alert(
         'Usage Limit Reached',
-        `You've used all ${FREE_MONTHLY_LIMIT} free symptom checks this month. Upgrade to Premium for unlimited assessments!`,
+        `You've used all ${FREE_MONTHLY_LIMIT} free SymptoGuide checks this month. Upgrade to Premium for unlimited assessments!`,
         [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Upgrade to Premium', onPress: () => setShowPaywall(true) }
@@ -506,7 +491,7 @@ export default function HealthScreen() {
         </View>
         <Text style={styles.premiumTitle}>Upgrade for Unlimited Access</Text>
         <Text style={styles.premiumDescription}>
-          You've used all {FREE_MONTHLY_LIMIT} free symptom checks this month. Upgrade to Premium for unlimited health assessments and priority support!
+          You've used all {FREE_MONTHLY_LIMIT} free SymptoGuide checks this month. Upgrade to Premium for unlimited health assessments and priority support!
         </Text>
         
         <TouchableOpacity
@@ -548,17 +533,13 @@ export default function HealthScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={Colors.backgroundGradient}
-        style={styles.container}
-      >
         <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.header}>
             <Heart size={32} color={Colors.primary} />
-            <Text style={styles.headerTitle}>Emergency Symptom Checker</Text>
+            <Text style={styles.headerTitle}>SymptoGuide</Text>
             <Text style={styles.headerSubtitle}>
               Select symptoms and get AI-powered veterinary guidance
             </Text>
@@ -576,8 +557,8 @@ export default function HealthScreen() {
                 </View>
                 <Text style={styles.usageDetails}>
                   {isSubscribed 
-                    ? 'Enjoy unlimited symptom checks and priority support'
-                    : `${monthlyUsage}/4 symptom checks used this month`
+                    ? 'Enjoy unlimited SymptoGuide checks and priority support'
+                    : `${monthlyUsage}/4 SymptoGuide checks used this month`
                   }
                 </Text>
               </View>
@@ -680,17 +661,14 @@ export default function HealthScreen() {
           {aiAssessment && (
             <Card
               variant="elevated"
-              style={[
-                styles.assessmentCard,
-                { borderLeftColor: aiAssessment.color }
-              ]}
+              style={{ ...styles.assessmentCard, borderLeftColor: aiAssessment.color }}
             >
               {/* Urgency Level Header */}
               <View style={styles.assessmentHeader}>
                 <View style={[styles.urgencyIcon, { backgroundColor: aiAssessment.color }]}>
-                  {aiAssessment.urgencyLevel === 'emergency' && <AlertTriangle size={20} color={Colors.white} />}
-                  {aiAssessment.urgencyLevel === 'moderate' && <Clock size={20} color={Colors.white} />}
-                  {aiAssessment.urgencyLevel === 'mild' && <CheckCircle size={20} color={Colors.white} />}
+                  {aiAssessment.urgencyLevel === 'emergency' ? <AlertTriangle size={20} color={Colors.white} /> : null}
+                  {aiAssessment.urgencyLevel === 'moderate' ? <Clock size={20} color={Colors.white} /> : null}
+                  {aiAssessment.urgencyLevel === 'mild' ? <CheckCircle size={20} color={Colors.white} /> : null}
                 </View>
                 <Text style={[
                   styles.assessmentLevel,
@@ -744,13 +722,13 @@ export default function HealthScreen() {
 
               {/* Action Buttons */}
               <View style={styles.actionButtonsContainer}>
-                {aiAssessment.urgencyLevel === 'emergency' && (
+                {aiAssessment.urgencyLevel === 'emergency' ? (
                   <Button
                     title="🚨 Call Emergency Vet"
                     onPress={callEmergencyVet}
-                    style={[styles.emergencyButton, { backgroundColor: Colors.error }]}
+                    style={{ ...styles.emergencyButton, backgroundColor: Colors.error }}
                   />
-                )}
+                ) : null}
                 <Button
                   title="📍 Find Nearby Vets"
                   onPress={findNearbyVets}
@@ -768,6 +746,12 @@ export default function HealthScreen() {
             </Card>
           )}
 
+          {/* Disclaimer */}
+          <Card variant="outlined" style={styles.disclaimerCard}>
+            <Text style={styles.disclaimerTitle}>Important</Text>
+            <Text style={styles.disclaimerBody}>For informational use only — not a veterinary diagnosis. Consult a vet for medical advice.</Text>
+          </Card>
+
           <Card variant="outlined" style={styles.infoCard}>
             <View style={styles.infoHeader}>
               <Activity size={20} color={Colors.primary} />
@@ -782,7 +766,6 @@ export default function HealthScreen() {
             </Text>
           </Card>
         </ScrollView>
-      </LinearGradient>
       
       {/* Premium Paywall Modal */}
       {showPaywall && (
@@ -803,6 +786,7 @@ export default function HealthScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: Colors.background,
   },
   scrollContent: {
     paddingBottom: 20,
@@ -921,6 +905,24 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     marginHorizontal: 24,
+  },
+  disclaimerCard: {
+    marginHorizontal: 24,
+    marginBottom: 20,
+    borderColor: Colors.accent,
+    backgroundColor: '#fff4bb',
+  },
+  disclaimerTitle: {
+    fontSize: 14,
+    fontFamily: Fonts.body.bold,
+    color: Colors.text,
+    marginBottom: 6,
+  },
+  disclaimerBody: {
+    fontSize: 12,
+    fontFamily: Fonts.body.regular,
+    color: Colors.text,
+    lineHeight: 18,
   },
   infoHeader: {
     flexDirection: 'row',

@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './useAuth';
 import { MoodAnalysisResult } from '@/lib/moodAnalysisAPI';
@@ -77,6 +78,7 @@ export const useMoodLogs = (showSnackbar?: (message: string, type?: string) => v
   const [moodStreaks, setMoodStreaks] = useState<MoodStreak[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const channelRef = useRef<RealtimeChannel | null>(null);
 
   // Test database connection and table existence
   const testDatabaseConnection = async () => {
@@ -383,6 +385,38 @@ export const useMoodLogs = (showSnackbar?: (message: string, type?: string) => v
       testDatabaseConnection(); // Test database first
       fetchMoodLogs();
       fetchMoodStreaks();
+
+      // Ensure only a single subscription exists per mount
+      const channelName = `realtime-mood-logs-${user.id}`;
+      if (!channelRef.current) {
+        // Reuse existing channel if already present on the client
+        const existing = (supabase as any).getChannels?.().find((c: any) => c.topic === channelName);
+        if (existing) {
+          channelRef.current = existing as RealtimeChannel;
+        } else {
+          const channel = supabase
+            .channel(channelName)
+            .on('postgres_changes', { event: '*', schema: 'public', table: 'mood_logs', filter: `user_id=eq.${user.id}` }, () => {
+              fetchMoodLogs();
+              fetchMoodStreaks();
+            });
+          channelRef.current = channel;
+        }
+      }
+
+      // Subscribe only if not already subscribed/joining
+      if (channelRef.current && !['joining', 'joined'].includes((channelRef.current as any).state)) {
+        channelRef.current.subscribe();
+      }
+
+      return () => {
+        try {
+          if (channelRef.current) {
+            channelRef.current.unsubscribe();
+            channelRef.current = null;
+          }
+        } catch {}
+      };
     } else {
       console.log('❌ No user authenticated, clearing mood data');
       setMoodLogs([]);

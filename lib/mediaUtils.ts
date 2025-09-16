@@ -1,6 +1,8 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import { Alert, Platform } from 'react-native';
+import { supabase } from './supabase';
+import * as FileSystem from 'expo-file-system';
 
 export interface MediaResult {
   uri: string;
@@ -55,8 +57,8 @@ export class MediaUtils {
           type: 'image',
           name: asset.fileName || 'pet_image.jpg',
           size: asset.fileSize,
-          mimeType: asset.mimeType || 'image/jpeg',
-          base64: asset.base64,
+          mimeType: (asset.mimeType as string) || 'image/jpeg',
+          base64: (asset.base64 as string | undefined),
         };
       }
       return null;
@@ -65,6 +67,130 @@ export class MediaUtils {
       Alert.alert('Error', 'Failed to pick image from library. Please try again.');
       return null;
     }
+  }
+
+  static async uploadImageToSupabase(bucket: string, pathPrefix: string, localUri: string): Promise<{ publicUrl: string | null; error?: string }> {
+    try {
+      // Ensure authenticated session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        return { publicUrl: null, error: 'Not authenticated' };
+      }
+
+      // Derive extension safely; default to jpg
+      const rawExt = this.getFileExtension(localUri);
+      const fileExt = rawExt && rawExt.length <= 5 ? rawExt : 'jpg';
+      // Sanitize prefix and build object key
+      const safePrefix = (pathPrefix || 'pet-avatars').replace(/^\/+|\/+$/g, '');
+      const objectKey = `${safePrefix}_${Date.now()}.${fileExt}`;
+
+      // Read file as base64 and convert to Uint8Array for reliable upload on native
+      const base64 = await FileSystem.readAsStringAsync(localUri, { encoding: FileSystem.EncodingType.Base64 });
+      const byteArray = MediaUtils.base64ToUint8Array(base64);
+      const arrayBuffer = byteArray.buffer;
+      const contentType = fileExt === 'png' ? 'image/png' : fileExt === 'webp' ? 'image/webp' : 'image/jpeg';
+
+      console.log('🆙 Uploading image to storage:', { bucket, objectKey, contentType, bytes: byteArray.byteLength });
+
+      // Direct S3 presigned upload via Edge Function (preferred path)
+      try {
+        console.log('🔁 Using presigned S3 upload via Edge Function (preferred)...');
+        // Include auth headers explicitly for React Native
+        const { data: presign, error: presignErr } = await supabase.functions.invoke('s3-presign', {
+          body: { bucket, key: objectKey, contentType },
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+            apikey: (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '') as string,
+          },
+        });
+        if (presignErr || !presign?.uploadUrl) {
+          console.warn('❌ Presign error:', presignErr || presign);
+          // If presign failed, attempt direct storage as a fallback
+          const { error: directErr } = await supabase.storage
+            .from(bucket)
+            .upload(objectKey, byteArray, { contentType, upsert: true, cacheControl: '3600' });
+          if (directErr) {
+            return { publicUrl: null, error: directErr.message };
+          }
+        } else {
+          const blob: any = new Blob([byteArray], { type: contentType });
+          const putRes = await fetch(presign.uploadUrl, {
+            method: 'PUT',
+            headers: { 'Content-Type': contentType },
+            body: blob,
+          });
+          if (!putRes.ok) {
+            const text = await putRes.text().catch(() => '');
+            console.warn('❌ PUT to presigned URL failed:', putRes.status, text);
+            return { publicUrl: null, error: `Presigned upload failed: ${putRes.status}` };
+          }
+        }
+      } catch (pfErr: any) {
+        console.warn('💥 Presign preferred path exception:', pfErr);
+        return { publicUrl: null, error: pfErr?.message || 'Presign upload failed' };
+      }
+
+      // Ensure the file is public: if bucket is not public, fallback to signed URLs
+      const { data: pub } = supabase.storage.from(bucket).getPublicUrl(objectKey);
+      let url: string | null = pub?.publicUrl || null;
+      if (!url || url.trim() === '') {
+        // If presign flow returned a publicUrl, prefer that
+        try {
+          const { data: presigned } = await supabase.functions.invoke('s3-presign', {
+            body: { bucket, key: objectKey, contentType },
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session.access_token}`,
+              apikey: (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '') as string,
+            },
+          });
+          if (presigned?.publicUrl) {
+            url = presigned.publicUrl;
+          }
+        } catch {}
+        if (!url) {
+          // Fallback to signed URL if bucket is private
+          const { data: signed, error: signedErr } = await supabase.storage
+            .from(bucket)
+            .createSignedUrl(objectKey, 60 * 60 * 24 * 365); // 1 year
+          if (signedErr) {
+            console.warn('⚠️ Signed URL error:', signedErr);
+            return { publicUrl: null, error: signedErr.message };
+          }
+          url = signed?.signedUrl || null;
+        }
+      }
+      console.log('✅ Upload completed. URL:', url);
+      return { publicUrl: url };
+    } catch (e: any) {
+      console.warn('💥 Upload exception:', e);
+      return { publicUrl: null, error: e?.message || 'Upload failed' };
+    }
+  }
+
+  private static base64ToUint8Array(base64: string): Uint8Array {
+    const binaryString = globalThis.atob ? globalThis.atob(base64) : MediaUtils._polyfillAtob(base64);
+    const len = binaryString.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    return bytes;
+  }
+
+  // Minimal atob polyfill for React Native without global atob
+  private static _polyfillAtob(input: string): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=';
+    let str = input.replace(/=+$/, '');
+    let output = '';
+    if (str.length % 4 === 1) {
+      throw new Error('Invalid base64 string');
+    }
+    for (let bc = 0, bs = 0, buffer, i = 0; (buffer = str.charAt(i++)); ~buffer && (bs = bc % 4 ? bs * 64 + buffer : buffer, bc++ % 4) ? output += String.fromCharCode(255 & (bs >> ((-2 * bc) & 6))) : 0) {
+      buffer = chars.indexOf(buffer);
+    }
+    return output;
   }
 
   static async pickVideoFromLibrary(): Promise<MediaResult | null> {
@@ -118,8 +244,8 @@ export class MediaUtils {
           type: 'image',
           name: `pet_photo_${Date.now()}.jpg`,
           size: asset.fileSize,
-          mimeType: asset.mimeType || 'image/jpeg',
-          base64: asset.base64,
+          mimeType: (asset.mimeType as string) || 'image/jpeg',
+          base64: (asset.base64 as string | undefined),
         };
       }
       return null;

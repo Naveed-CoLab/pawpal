@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { LineChart } from 'react-native-chart-kit';
-import { LinearGradient } from 'expo-linear-gradient';
+// Removed heavy gradients to align with single-color pages
 import { Colors } from '@/constants/Colors';
 import { Fonts } from '@/constants/Fonts';
 import { 
@@ -56,7 +56,7 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
   const [selectedMetric, setSelectedMetric] = useState<'overall' | 'mood' | 'health'>('overall');
 
   // Get pet ID (from props or primary pet)
-  const petId = propPetId || pets.find(p => p.is_primary)?.id || pets[0]?.id;
+  const petId = propPetId || pets[0]?.id;
   
   useEffect(() => {
     if (user?.id && petId) {
@@ -137,7 +137,7 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
         case 'mood':
           return '#ff9d00'; // Orange for mood
         case 'health':
-          return '#66bb6a'; // Green for health
+          return '#ffb74d'; // Warm amber for health (no green)
         default:
           return '#ffb74d'; // Warm yellow for overall
       }
@@ -158,7 +158,7 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
     
     switch (trendData.insights.trend) {
       case 'improving':
-        return <TrendingUp size={20} color="#66bb6a" />;
+        return <TrendingUp size={20} color="#ff9d00" />;
       case 'declining':
         return <TrendingDown size={20} color="#ff7043" />;
       default:
@@ -171,7 +171,7 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
     
     switch (trendData.insights.trend) {
       case 'improving':
-        return '#66bb6a';
+        return '#ff9d00';
       case 'declining':
         return '#ff7043';
       default:
@@ -192,34 +192,34 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
 
   if (loading) {
     return (
-      <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.loadingContainer}>
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#ff9d00" />
         <Text style={styles.loadingText}>Loading behavior trends...</Text>
-      </LinearGradient>
+      </View>
     );
   }
 
   if (error) {
     return (
-      <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.errorContainer}>
+      <View style={styles.errorContainer}>
         <AlertTriangle size={40} color="#ff7043" />
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity style={styles.retryButton} onPress={fetchTrendData}>
           <Text style={styles.retryButtonText}>Retry</Text>
         </TouchableOpacity>
-      </LinearGradient>
+      </View>
     );
   }
 
   if (!trendData || trendData.insights.totalEntries === 0) {
     return (
-      <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.emptyContainer}>
+      <View style={styles.emptyContainer}>
         <Activity size={40} color="#ffcc80" />
         <Text style={styles.emptyTitle}>No Behavior Data Yet</Text>
         <Text style={styles.emptySubtitle}>
-          Start using Snap My Mood and Health Checker to see your pet's behavior trends
+          Start using Snap My Mood and SymptoGuide to see your pet's behavior trends
         </Text>
-      </LinearGradient>
+      </View>
     );
   }
 
@@ -227,7 +227,7 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       {/* Header - Only show if not hidden */}
       {!hideHeader && (
-        <LinearGradient colors={['#fff8e1', '#ffecb3']} style={styles.header}>
+        <View style={styles.header}>
           <View style={styles.titleContainer}>
             <Activity size={24} color="#ff9d00" />
             <Text style={styles.title}>Behavior Trends</Text>
@@ -238,7 +238,7 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
               {trendData.insights.trend}
             </Text>
           </View>
-        </LinearGradient>
+        </View>
       )}
 
       {/* Time Range Selector */}
@@ -286,27 +286,24 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
 
       {/* Chart with Beautiful Gradient */}
       <View style={styles.chartContainer}>
-        <LinearGradient
-          colors={['#fffbf0', '#fff8e1']}
-          style={styles.chartBackground}
-        >
+        <View style={styles.chartBackground}>
           <LineChart
             data={getChartData()}
             width={chartWidth}
             height={200}
             chartConfig={{
               backgroundColor: 'transparent',
-              backgroundGradientFrom: '#fffbf0',
-              backgroundGradientFromOpacity: 0,
+              backgroundGradientFrom: '#fff8e1',
+              backgroundGradientFromOpacity: 1,
               backgroundGradientTo: '#fff8e1',
-              backgroundGradientToOpacity: 0.1,
+              backgroundGradientToOpacity: 1,
               decimalPlaces: 1,
               color: (opacity = 1) => {
                 switch (selectedMetric) {
                   case 'mood':
                     return `rgba(255, 157, 0, ${opacity})`;
                   case 'health':
-                    return `rgba(102, 187, 106, ${opacity})`;
+                    return `rgba(255, 183, 77, ${opacity})`;
                   default:
                     return `rgba(255, 183, 77, ${opacity})`;
                 }
@@ -325,7 +322,7 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
                 fontFamily: Fonts.body.regular
               },
               fillShadowGradientFrom: selectedMetric === 'mood' ? '#ff9d00' : 
-                                     selectedMetric === 'health' ? '#66bb6a' : '#ffb74d',
+                                     selectedMetric === 'health' ? '#ffb74d' : '#ffcc80',
               fillShadowGradientFromOpacity: 0.4,
               fillShadowGradientTo: '#fff8e1',
               fillShadowGradientToOpacity: 0.1,
@@ -343,12 +340,12 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
             horizontalLabelRotation={0}
             yAxisInterval={1}
           />
-        </LinearGradient>
+        </View>
       </View>
 
       {/* Insights Cards */}
       <View style={styles.insightsContainer}>
-        <LinearGradient colors={['#fff8f0', '#fff8f0']} style={styles.insightCard}>
+        <View style={styles.insightCard}>
           <View style={styles.insightHeader}>
             <Brain size={20} color="#ff9d00" />
             <Text style={styles.insightTitle}>Average Mood</Text>
@@ -359,11 +356,11 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
           <Text style={styles.insightSubtitle}>
             {trendData.insights.commonMoods[0]?.mood.replace('_', ' ') || 'No data'}
           </Text>
-        </LinearGradient>
+        </View>
 
-        <LinearGradient colors={['#fff8f0', '#fff8f0']} style={styles.insightCard}>
+        <View style={styles.insightCard}>
           <View style={styles.insightHeader}>
-            <Heart size={20} color="#66bb6a" />
+            <Heart size={20} color="#ffb74d" />
             <Text style={styles.insightTitle}>Health Score</Text>
           </View>
           <Text style={styles.insightValue}>
@@ -375,23 +372,23 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
               : 'All good'
             }
           </Text>
-        </LinearGradient>
+        </View>
 
-        <LinearGradient colors={['#fff8f0', '#fff8f0']} style={styles.insightCard}>
+        <View style={styles.insightCard}>
           <View style={styles.insightHeader}>
             <Calendar size={20} color="#ffb74d" />
             <Text style={styles.insightTitle}>Weekly Trend</Text>
           </View>
           <Text style={[
             styles.insightValue,
-            { color: trendData.insights.lastWeekTrend >= 0 ? '#66bb6a' : '#ff7043' }
+            { color: trendData.insights.lastWeekTrend >= 0 ? '#ff9d00' : '#ff7043' }
           ]}>
             {trendData.insights.lastWeekTrend >= 0 ? '+' : ''}{trendData.insights.lastWeekTrend}%
           </Text>
           <Text style={styles.insightSubtitle}>
             vs. previous week
           </Text>
-        </LinearGradient>
+        </View>
       </View>
 
       {/* Common Moods */}
@@ -400,9 +397,8 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
           <Text style={styles.moodsTitle}>Most Common Moods</Text>
           <View style={styles.moodsGrid}>
             {trendData.insights.commonMoods.map((moodData, index) => (
-              <LinearGradient
+              <View
                 key={moodData.mood}
-                colors={['#fff8e1', '#ffecb3']}
                 style={styles.moodChip}
               >
                 <Text style={styles.moodEmoji}>
@@ -414,14 +410,14 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
                 <Text style={styles.moodCount}>
                   {moodData.count}x
                 </Text>
-              </LinearGradient>
+              </View>
             ))}
           </View>
         </View>
       )}
 
       {/* Summary */}
-      <LinearGradient colors={['#fff4bb', '#fff4bb']} style={styles.summaryContainer}>
+      <View style={styles.summaryContainer}>
         <Text style={styles.summaryTitle}>Summary</Text>
         <Text style={styles.summaryText}>
           Over the last {selectedTimeRange} days, your pet shows a{' '}
@@ -436,7 +432,7 @@ export const BehaviorTrendChart: React.FC<BehaviorTrendChartProps> = ({
             </Text>
           )}
         </Text>
-      </LinearGradient>
+      </View>
     </ScrollView>
   );
 };
@@ -593,11 +589,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     borderRadius: 16,
     overflow: 'hidden',
-    elevation: 3,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: '#F1E4BF',
   },
   chartBackground: {
     padding: 10,
@@ -615,11 +608,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     padding: 16,
-    elevation: 2,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    borderWidth: 1,
+    borderColor: '#F1E4BF',
   },
   insightHeader: {
     flexDirection: 'row',
@@ -662,11 +652,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 12,
     alignItems: 'center',
-    elevation: 2,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    borderWidth: 1,
+    borderColor: '#F1E4BF',
     minWidth: 80,
   },
   moodEmoji: {
@@ -691,12 +678,8 @@ const styles = StyleSheet.create({
     marginBottom: 30,
     borderRadius: 12,
     padding: 16,
-    elevation: 2,
-    shadowColor: '#47463e',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    borderColor: '#f5d982',
+    borderWidth: 1,
+    borderColor: '#F1E4BF',
   },
   summaryTitle: {
     fontSize: 16,

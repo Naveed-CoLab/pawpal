@@ -33,6 +33,7 @@ interface PetCardProps {
 
 export function PetCard({ pet, onEdit, onDelete, onPress }: PetCardProps) {
   const [avatarError, setAvatarError] = useState(false);
+  const [pressed, setPressed] = useState(false);
 
   const isValidImageUri = (uri?: string) => {
     if (!uri) return false;
@@ -59,21 +60,41 @@ export function PetCard({ pet, onEdit, onDelete, onPress }: PetCardProps) {
   };
 
   return (
-    <TouchableOpacity onPress={() => onPress?.(pet)} activeOpacity={0.7}>
-      <Card variant="elevated" style={styles.container}>
+    <TouchableOpacity
+      onPress={() => onPress?.(pet)}
+      activeOpacity={0.9}
+      onPressIn={() => setPressed(true)}
+      onPressOut={() => setPressed(false)}
+    >
+      <Card
+        variant="elevated"
+        style={[
+          styles.container,
+          pressed && { transform: [{ translateY: 1 }], opacity: 0.98 },
+        ]}
+      >
         <View style={styles.header}>
-          <Image
-            source={petImageSource}
-            style={styles.avatar}
-            resizeMode="cover"
-            onError={() => setAvatarError(true)}
-          />
+          <View style={styles.avatarWrap}>
+            <Image
+              source={petImageSource}
+              style={styles.avatar}
+              resizeMode="cover"
+              onError={() => setAvatarError(true)}
+            />
+          </View>
           <View style={styles.info}>
             <Text style={styles.name} numberOfLines={1}>{pet.name}</Text>
             <Text style={styles.breed} numberOfLines={1}>{pet.breed}</Text>
-            <Text style={styles.details} numberOfLines={1}>
-              {pet.age} years • {pet.gender}
-            </Text>
+            <View style={styles.metaRow}>
+              <Text style={styles.details} numberOfLines={1}>
+                {pet.age} yrs • {pet.gender}
+              </Text>
+              {!!(pet as any)?.weight && (
+                <View style={styles.chip}>
+                  <Text style={styles.chipText}>{(pet as any).weight} kg</Text>
+                </View>
+              )}
+            </View>
           </View>
           <View style={styles.actions}>
             {onEdit && (
@@ -102,17 +123,38 @@ export function PetCard({ pet, onEdit, onDelete, onPress }: PetCardProps) {
 const styles = StyleSheet.create({
   container: {
     marginBottom: responsiveHeight(1.5),
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.white,
+    paddingVertical: responsiveHeight(1.6),
+    paddingHorizontal: responsiveWidth(3.5),
+    shadowColor: Colors.text,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     minHeight: responsiveHeight(8),
   },
+  avatarWrap: {
+    width: responsiveWidth(16),
+    height: responsiveWidth(16),
+    borderRadius: responsiveWidth(8),
+    borderWidth: 2,
+    borderColor: Colors.accent,
+    backgroundColor: Colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: responsiveWidth(3.5),
+  },
   avatar: {
-    width: responsiveWidth(15),
-    height: responsiveWidth(15),
-    borderRadius: responsiveWidth(7.5),
-    marginRight: responsiveWidth(4),
+    width: responsiveWidth(14),
+    height: responsiveWidth(14),
+    borderRadius: responsiveWidth(7),
   },
   info: {
     flex: 1,
@@ -123,16 +165,21 @@ const styles = StyleSheet.create({
     fontSize: responsiveFontSize(18),
     fontFamily: Fonts.heading.semiBold,
     color: Colors.text,
-    marginBottom: responsiveHeight(0.5),
+    marginBottom: responsiveHeight(0.4),
     lineHeight: responsiveFontSize(22),
   },
   breed: {
     fontSize: responsiveFontSize(14),
     fontFamily: Fonts.body.medium,
     color: Colors.text,
-    opacity: 0.8,
+    opacity: 0.85,
     marginBottom: responsiveHeight(0.3),
     lineHeight: responsiveFontSize(16),
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: responsiveWidth(2),
   },
   details: {
     fontSize: responsiveFontSize(12),
@@ -140,9 +187,21 @@ const styles = StyleSheet.create({
     color: Colors.disabled,
     lineHeight: responsiveFontSize(14),
   },
+  chip: {
+    backgroundColor: Colors.secondary,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  chipText: {
+    fontSize: responsiveFontSize(10),
+    fontFamily: Fonts.body.medium,
+    color: Colors.text,
+  },
   actions: {
     flexDirection: 'row',
     gap: responsiveWidth(2),
+    marginLeft: responsiveWidth(1),
   },
   actionButton: {
     width: responsiveWidth(8),
